@@ -1,87 +1,62 @@
+extern crate getopts;
 extern crate piston;
 extern crate graphics;
 extern crate glutin_window;
 extern crate opengl_graphics;
 
-use piston::window::WindowSettings;
-use piston::event_loop::*;
-use piston::input::*;
-use glutin_window::GlutinWindow as Window;
-use opengl_graphics::{ GlGraphics, OpenGL };
+use getopts::Options;
+use std::env;
+use std::thread;
+use std::thread::JoinHandle;
 
-pub struct App {
-    gl: GlGraphics, // OpenGL drawing backend.
-    rotation: f64   // Rotation for the square.
-}
+mod server;
+use server::Server;
 
-impl App {
-    fn render(&mut self, args: &RenderArgs) {
-        use graphics::*;
+mod client;
+use client::Client;
 
-        // rgb(4, 33, 63)
-        const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
-        // rgb(32, 192, 222)
-        const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
-        // rgb(222, 217, 135)
-        const TADPOLE_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
-
-        let planet = ellipse::circle(0.0, 0.0, 50.0);
-        let tadpole = ellipse::circle(0.0, 0.0, 5.0);
-
-        let rotation = self.rotation;
-        let (x, y) = ((args.width / 2) as f64,
-                      (args.height / 2) as f64);
-
-
-        self.gl.draw(args.viewport(), |c, gl| {
-            // Clear the screen.
-            clear(SPACE_COLOR, gl);
-
-            let planet_transform = c.transform.trans(x, y);
-            let tadpole_transform = c.transform.trans(x, y)
-                                       .rot_rad(rotation)
-                                       .trans(-50.0, -50.0);
-
-            // Draw a box rotating around the middle of the screen.
-            ellipse(PLANET_COLOR, planet, planet_transform, gl);
-            ellipse(TADPOLE_COLOR, tadpole, tadpole_transform, gl);
+fn run_server(server_address: Option<String>) -> Option<JoinHandle<()>> {
+    if server_address.is_some() {
+        println!("Starting server on {}", server_address.unwrap_or("127.0.0.1:9999".to_string()));
+        let server_thread = thread::spawn(|| {
+            (Server {}).run();
         });
+
+        return Some(server_thread);
     }
 
-    fn update(&mut self, args: &UpdateArgs) {
-        // Rotate 2 radians per second.
-        self.rotation += 2.0 * args.dt;
-    }
+    return None;
 }
 
 fn main() {
-    // Change this to OpenGL::V2_1 if not working.
-    let opengl = OpenGL::V3_2;
+    let args: Vec<String> = env::args().collect();
+    let program = args[0].clone();
 
-    // Create an Glutin window.
-    let mut window: Window = WindowSettings::new(
-            "spinning-square",
-            [200, 200]
-        )
-        .opengl(opengl)
-        .exit_on_esc(true)
-        .build()
-        .unwrap();
+    let mut opts = Options::new();
+    opts.optopt("c", "client", "address and port of server to connect", "127.0.0.1:9999");
+    opts.optopt("s", "server", "address and port for server binding", "127.0.0.1:9999");
+    opts.optflag("h", "help", "print this help message");
 
-    // Create a new game and run it.
-    let mut app = App {
-        gl: GlGraphics::new(opengl),
-        rotation: 0.0
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => { m }
+        Err(f) => { panic!(f.to_string()) }
     };
 
-    let mut events = window.events();
-    while let Some(e) = events.next(&mut window) {
-        if let Some(r) = e.render_args() {
-            app.render(&r);
-        }
+    if matches.opt_present("h") {
+        let brief = format!("Usage: {} [options]", program);
+        print!("{}", opts.usage(&brief));
+        return;
+    }
 
-        if let Some(u) = e.update_args() {
-            app.update(&u);
-        }
+    let server_address = matches.opt_str("s");
+    let server_thread = run_server(server_address);
+
+    let client_address = matches.opt_str("c");
+    if client_address.is_some() {
+        Client {}.run();
+    }
+
+    if client_address.is_none() && server_thread.is_some() {
+        server_thread.unwrap().join().unwrap();
     }
 }

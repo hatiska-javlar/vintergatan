@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Fedor Gorbunov <raigfp@yandex-team.ru>", "Ilya Telegin <ilya.a.telegin@gmail.com>"]
 
 [dependencies]
+getopts = "0.2"
 piston = "0.26.0"
 piston2d-graphics = "0.17.0"
 pistoncore-glutin_window = "0.31.0"
