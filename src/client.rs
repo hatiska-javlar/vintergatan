@@ -1,8 +1,11 @@
+use std::thread;
+
 use piston::window::WindowSettings;
 use piston::event_loop::*;
 use piston::input::*;
 use glutin_window::GlutinWindow as Window;
-use opengl_graphics::{ GlGraphics, OpenGL };
+use opengl_graphics::{GlGraphics, OpenGL};
+use ws::{connect, Sender, Handler, Result, Message, Handshake, CloseCode};
 
 pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
@@ -53,6 +56,8 @@ pub struct Client {}
 
 impl Client {
     pub fn run(&self) {
+        thread::spawn(move || connect("ws://127.0.0.1:3012", |out| WebsocketClient { out: out }).unwrap());
+
         // Change this to OpenGL::V2_1 if not working.
         let opengl = OpenGL::V3_2;
 
@@ -82,5 +87,28 @@ impl Client {
                 app.update(&u);
             }
         }
+    }
+}
+
+struct WebsocketClient {
+    out: Sender
+}
+
+impl Handler for WebsocketClient {
+    fn on_open(&mut self, shake: Handshake) -> Result<()> {
+        println!("New connection is opened from {}", shake.peer_addr.unwrap());
+
+        Ok(())
+    }
+
+    fn on_message(&mut self, message: Message) -> Result<()> {
+        let raw = message.into_text().unwrap_or("".to_string());
+        println!("{}", raw);
+
+        Ok(())
+    }
+
+    fn on_close(&mut self, code: CloseCode, reason: &str) {
+        println!("Connection closed code = {:?}, reason = {}", code, reason);
     }
 }

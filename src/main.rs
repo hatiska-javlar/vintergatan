@@ -3,11 +3,13 @@ extern crate piston;
 extern crate graphics;
 extern crate glutin_window;
 extern crate opengl_graphics;
+extern crate ws;
 
 use getopts::Options;
 use std::env;
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 mod server;
 use server::Server;
@@ -53,6 +55,7 @@ fn main() {
 
     let client_address = matches.opt_str("c");
     if client_address.is_some() {
+        thread::sleep(Duration::from_secs(1));
         Client {}.run();
     }
 
