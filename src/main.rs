@@ -4,12 +4,15 @@ extern crate graphics;
 extern crate glutin_window;
 extern crate opengl_graphics;
 extern crate ws;
+extern crate rand;
+extern crate rustc_serialize;
 
 use getopts::Options;
 use std::env;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use std::collections::HashMap;
 
 mod server;
 use server::Server;
@@ -17,11 +20,14 @@ use server::Server;
 mod client;
 use client::Client;
 
+mod planet;
+mod world_command;
+
 fn run_server(server_address: Option<String>) -> Option<JoinHandle<()>> {
     if server_address.is_some() {
         println!("Starting server on {}", server_address.unwrap_or("127.0.0.1:9999".to_string()));
         let server_thread = thread::spawn(|| {
-            (Server {}).run();
+            (Server {planets: HashMap::new(), players: vec![]}).run();
         });
 
         return Some(server_thread);
@@ -56,7 +62,7 @@ fn main() {
     let client_address = matches.opt_str("c");
     if client_address.is_some() {
         thread::sleep(Duration::from_secs(1));
-        Client {}.run();
+        Client {cursor_position: [0.0, 0.0]}.run();
     }
 
     if client_address.is_none() && server_thread.is_some() {
