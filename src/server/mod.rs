@@ -1,8 +1,10 @@
-use std::collections::HashMap;
-
 mod server;
+mod websocket_listener;
+mod world_command;
+
 use server::server::Server;
 
 pub fn run() {
-    Server { planets: HashMap::new(), players: vec![] }.run();
+    let mut server = Server::new();
+    server.run();
 }

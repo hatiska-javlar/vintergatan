@@ -17,7 +17,6 @@ mod client;
 mod server;
 
 mod planet;
-mod world_command;
 
 fn run_server(server_address: Option<String>) -> Option<JoinHandle<()>> {
     if server_address.is_some() {
