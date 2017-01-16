@@ -1,6 +1,10 @@
 mod client;
+mod websocket_client;
+mod client_command;
+
 use client::client::Client;
 
 pub fn run() {
-    Client { cursor_position: [0.0, 0.0] }.run();
+    let mut client = Client::new();
+    client.run();
 }
