@@ -1,20 +1,42 @@
-use std::thread;
-use std::time::Duration;
 use std::cmp::min;
-
-use ws::{listen, Sender};
-
-use std::sync::mpsc::channel;
-use rand::{thread_rng, Rng, random};
-use planet::PlanetServer;
 use std::collections::HashMap;
+use std::sync::mpsc::{
+    channel,
+    Receiver as ChannelReceiver
+};
+use std::thread;
+
+use piston::event_loop::{
+    Events,
+    EventLoop
+};
+use piston::input::{
+    RenderArgs,
+    RenderEvent,
+    UpdateArgs,
+    UpdateEvent
+};
+use piston::window::{
+    NoWindow,
+    WindowSettings
+};
+use rand::{
+    random,
+    thread_rng,
+    Rng
+};
+use ws::{
+    listen,
+    Sender
+};
 
 use server::websocket_listener::WebsocketListener;
 use server::world_command::WorldCommand;
+use planet::PlanetServer;
 
 pub struct Server {
-    pub planets: HashMap<u64, PlanetServer>,
-    pub players: Vec<Sender>
+    planets: HashMap<u64, PlanetServer>,
+    players: Vec<Sender>
 }
 
 impl Server {
@@ -29,24 +51,45 @@ impl Server {
         let (tx, rx) = channel::<WorldCommand>();
         thread::spawn(move || listen("127.0.0.1:3012", |out| WebsocketListener::new(out, tx.clone())).unwrap());
 
-        loop {
-            while let Ok(world_command) = rx.try_recv() {
-                match world_command {
-                    WorldCommand::Connect { sender } => self.add_player(sender)
-                }
+        let window_settings = WindowSettings::new("Vintergatan game server", [1, 1]);
+        let mut no_window = NoWindow::new(&window_settings);
+
+        let mut events = no_window
+            .events()
+            .ups(10)
+            .max_fps(10);
+
+        while let Some(e) = events.next(&mut no_window) {
+            if let Some(u) = e.update_args() {
+                self.process(&rx);
+                self.update(&u);
             }
 
-            for player in &self.players {
-                let s = self.planets.values().map(|planet| {
-                    format!("{{\"id\":{},\"x\":{},\"y\":{}}}", planet.id, planet.x, planet.y)
-                });
-
-                let x = format!("{{\"planets\": [{}]}}", s.fold("".to_string(), |a, b| if a.len() > 0 { a + &",".to_string() } else { a } + &b.to_string()));
-
-                player.send(x).unwrap();
+            if let Some(r) = e.render_args() {
+                self.render(&r);
             }
+        }
+    }
 
-            thread::sleep(Duration::from_secs(1));
+    fn process(&mut self, rx: &ChannelReceiver<WorldCommand>) {
+        while let Ok(world_command) = rx.try_recv() {
+            match world_command {
+                WorldCommand::Connect { sender } => self.add_player(sender)
+            }
+        }
+    }
+
+    fn update(&mut self, args: &UpdateArgs) { }
+
+    fn render(&mut self, args: &RenderArgs) {
+        for player in &self.players {
+            let s = self.planets.values().map(|planet| {
+                format!("{{\"id\":{},\"x\":{},\"y\":{}}}", planet.id, planet.x, planet.y)
+            });
+
+            let x = format!("{{\"planets\": [{}]}}", s.fold("".to_string(), |a, b| if a.len() > 0 { a + &",".to_string() } else { a } + &b.to_string()));
+
+            player.send(x).unwrap();
         }
     }
 
