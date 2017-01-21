@@ -30,8 +30,8 @@ use ws::{
     Sender
 };
 
-use server::websocket_listener::WebsocketListener;
-use server::world_command::WorldCommand;
+use common::websocket_handler::WebsocketHandler;
+use server::command::Command;
 use planet::PlanetServer;
 
 pub struct Server {
@@ -48,8 +48,8 @@ impl Server {
     }
 
     pub fn run(&mut self) {
-        let (tx, rx) = channel::<WorldCommand>();
-        thread::spawn(move || listen("127.0.0.1:3012", |out| WebsocketListener::new(out, tx.clone())).unwrap());
+        let (tx, rx) = channel::<Command>();
+        thread::spawn(move || listen("127.0.0.1:3012", |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
         let window_settings = WindowSettings::new("Vintergatan game server", [1, 1]);
         let mut no_window = NoWindow::new(&window_settings);
@@ -71,10 +71,11 @@ impl Server {
         }
     }
 
-    fn process(&mut self, rx: &ChannelReceiver<WorldCommand>) {
-        while let Ok(world_command) = rx.try_recv() {
-            match world_command {
-                WorldCommand::Connect { sender } => self.add_player(sender)
+    fn process(&mut self, rx: &ChannelReceiver<Command>) {
+        while let Ok(command) = rx.try_recv() {
+            match command {
+                Command::Connect { sender } => self.add_player(sender),
+                _ => { }
             }
         }
     }

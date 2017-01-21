@@ -1,6 +1,5 @@
 mod client;
-mod websocket_client;
-mod client_command;
+mod command;
 
 use client::client::Client;
 

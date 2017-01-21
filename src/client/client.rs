@@ -10,14 +10,14 @@ use opengl_graphics::{GlGraphics, OpenGL};
 use ws::connect;
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
-use client::client_command::ClientCommand;
-use client::websocket_client::WebsocketClient;
+use client::command::Command;
+use common::websocket_handler::WebsocketHandler;
 use planet::PlanetClient;
 
 pub struct Client {
     window: GlutinWindow,
     gl: GlGraphics,
-    rx: Option<ChannelReceiver<ClientCommand>>,
+    rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: [f64; 2],
     planets: HashMap<u64, PlanetClient>
@@ -46,10 +46,10 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        let (tx, rx) = channel::<ClientCommand>();
+        let (tx, rx) = channel::<Command>();
 
         self.rx = Some(rx);
-        thread::spawn(move || connect("ws://127.0.0.1:3012", |out| WebsocketClient::new(out, tx.clone())).unwrap());
+        thread::spawn(move || connect("ws://127.0.0.1:3012", |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
         let mut events = self.window.events();
         while let Some(e) = events.next(&mut self.window) {
@@ -103,9 +103,9 @@ impl Client {
 
     fn update(&mut self, args: &UpdateArgs) {
         if let Some(ref rx) = self.rx {
-            while let Ok(client_command) = rx.try_recv() {
-                match client_command {
-                    ClientCommand::Process { planets } => {
+            while let Ok(command) = rx.try_recv() {
+                match command {
+                    Command::Process { sender, planets } => {
                         let mut client_planets = &mut self.planets;
 
                         for planet in planets {
@@ -119,7 +119,8 @@ impl Client {
 
                             client_planets.insert(id, planet);
                         }
-                    }
+                    },
+                    _ => { }
                 }
             };
         }

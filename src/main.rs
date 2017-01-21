@@ -13,6 +13,7 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+mod common;
 mod client;
 mod server;
 

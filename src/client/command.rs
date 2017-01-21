@@ -1,31 +1,36 @@
-use std::sync::mpsc::Sender as ChannelSender;
-use rustc_serialize::json::{Json, Object};
-use ws::{Sender, Handler, Handshake, Message, CloseCode, Result};
-use client::client_command::ClientCommand;
+use rustc_serialize::json::{
+    Json,
+    Object
+};
+use ws::{
+    Message,
+    Sender
+};
+
+use common::to_command::ToCommand;
 use planet::PlanetClient;
 
-pub struct WebsocketClient {
-    out: Sender,
-    tx: ChannelSender<ClientCommand>
-}
+pub enum Command {
+    Connect {
+        sender: Sender
+    },
 
-impl WebsocketClient {
-    pub fn new(out: Sender, tx: ChannelSender<ClientCommand>) -> Self {
-        WebsocketClient {
-            out: out,
-            tx: tx
-        }
+    Process {
+        sender: Sender,
+        planets: Vec<PlanetClient>
+    },
+
+    Disconnect {
+        sender: Sender
     }
 }
 
-impl Handler for WebsocketClient {
-    fn on_open(&mut self, shake: Handshake) -> Result<()> {
-        println!("New connection is opened to {}", shake.peer_addr.unwrap());
-
-        Ok(())
+impl ToCommand for Command {
+    fn connect(sender: Sender) -> Self {
+        Command::Connect { sender: sender }
     }
 
-    fn on_message(&mut self, message: Message) -> Result<()> {
+    fn process(sender: Sender, message: Message) -> Result<Self, ()> {
         let raw = message.into_text().unwrap_or("".to_string());
         let parsed = Json::from_str(&raw).unwrap_or(Json::Object(Object::new()));
 
@@ -43,15 +48,18 @@ impl Handler for WebsocketClient {
                 }
             }).collect();
 
-            self.tx.send(ClientCommand::Process {
+            let process_command = Command::Process {
+                sender: sender,
                 planets: planets
-            }).unwrap();
+            };
+
+            return Ok(process_command);
         }
 
-        Ok(())
+        Err(())
     }
 
-    fn on_close(&mut self, code: CloseCode, reason: &str) {
-        println!("Connection closed code = {:?}, reason = {}", code, reason);
+    fn disconnect(sender: Sender) -> Self {
+        Command::Disconnect { sender: sender }
     }
 }
