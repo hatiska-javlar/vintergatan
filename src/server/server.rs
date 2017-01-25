@@ -51,35 +51,35 @@ impl Server {
     }
 
     fn generate_planets() -> HashMap<u64, PlanetServer> {
-        let HALF_WINDOW_WIDTH = 640;
-        let HALF_WINDOW_HEIGHT = 400;
-        let PLANETS_DENSITY = 0.9;
-        let GRID_STEP = 20;
+        let half_window_width = 640;
+        let half_window_height = 400;
+        let planets_density = 1.0;
+        let grid_step = 40;
 
-        let grid_x_start = -HALF_WINDOW_WIDTH + GRID_STEP;
-        let grid_x_end = HALF_WINDOW_WIDTH - GRID_STEP;
-        let grid_y_start = -HALF_WINDOW_HEIGHT + GRID_STEP;
-        let grid_y_end = HALF_WINDOW_HEIGHT - GRID_STEP;
+        let grid_x_start = -half_window_width + grid_step;
+        let grid_x_end = half_window_width - grid_step;
+        let grid_y_start = -half_window_height + grid_step;
+        let grid_y_end = half_window_height - grid_step;
 
-        let short_side = min(HALF_WINDOW_WIDTH, HALF_WINDOW_HEIGHT);
-        let content_short_side = (short_side - GRID_STEP) * 2;
-        let max_planets_count = content_short_side / GRID_STEP / 2;
+        let short_side = min(half_window_width, half_window_height);
+        let content_short_side = (short_side - grid_step) * 2;
+        let max_planets_count = content_short_side / grid_step;
 
         let mut grid_x_coordinates = vec![];
         let mut grid_y_coordinates = vec![];
 
-        for x in grid_x_start / GRID_STEP .. grid_x_end / GRID_STEP {
-            grid_x_coordinates.push((x * GRID_STEP) as f64);
+        for x in (grid_x_start / grid_step)..(grid_x_end / grid_step) {
+            grid_x_coordinates.push((x * grid_step) as f64);
         }
-        for y in grid_y_start / GRID_STEP .. grid_y_end / GRID_STEP {
-            grid_y_coordinates.push((y * GRID_STEP) as f64);
+        for y in (grid_y_start / grid_step)..(grid_y_end / grid_step) {
+            grid_y_coordinates.push((y * grid_step) as f64);
         }
 
         thread_rng().shuffle(&mut grid_x_coordinates);
         thread_rng().shuffle(&mut grid_y_coordinates);
 
         let mut planets = HashMap::new();
-        for i in 0 .. (max_planets_count as f64 * PLANETS_DENSITY) as usize {
+        for i in 0..(max_planets_count as f64 * planets_density) as usize {
             let id = random::<u64>();
             let planet = PlanetServer {
                 id: id,
