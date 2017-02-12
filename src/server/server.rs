@@ -32,18 +32,19 @@ use ws::{
 
 use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
+use server::player::{Player, PlayerId};
 use planet::PlanetServer;
 
 pub struct Server {
     planets: HashMap<u64, PlanetServer>,
-    players: Vec<Sender>
+    players: HashMap<PlayerId, Player>
 }
 
 impl Server {
     pub fn new() -> Self {
         Server {
             planets: Self::generate_planets(),
-            players: vec![]
+            players: HashMap::new()
         }
     }
 
@@ -83,14 +84,19 @@ impl Server {
     fn update(&mut self, args: &UpdateArgs) { }
 
     fn render(&mut self, args: &RenderArgs) {
-        for player in &self.players {
-            let s = self.planets.values().map(|planet| {
-                format!("{{\"id\":{},\"x\":{},\"y\":{}}}", planet.id, planet.x, planet.y)
-            });
+        let planets_json = self.format_planets_as_json();
+        let players_json = self.format_players_as_json();
 
-            let x = format!("{{\"planets\": [{}]}}", s.fold("".to_string(), |a, b| if a.len() > 0 { a + &",".to_string() } else { a } + &b.to_string()));
+        let players = self.players.values();
+        for player in players {
+            let message_json = format!(
+                "{{\"planets\":{},\"players\":{},\"id\":{}}}",
+                planets_json,
+                players_json,
+                player.id()
+            );
 
-            player.send(x).unwrap();
+            player.send(message_json);
         }
     }
 
@@ -138,6 +144,33 @@ impl Server {
     }
 
     fn add_player(&mut self, sender: Sender) {
-        self.players.push(sender);
+        let player = Player::new(sender);
+
+        let ref mut players = self.players;
+        players.insert(player.id(), player);
+    }
+
+    fn format_planets_as_json(&self) -> String {
+        let formatted_planets = self.planets
+            .values()
+            .map(|planet| format!("{{\"id\":{},\"x\":{},\"y\":{}}}", planet.id, planet.x, planet.y))
+            .collect::<Vec<String>>();
+
+        format!("[{}]", Self::join(formatted_planets, ","))
+    }
+
+    fn format_players_as_json(&self) -> String {
+        let formatted_players = self.players
+            .values()
+            .map(|player| format!("{{\"id\":{}}}", player.id()))
+            .collect::<Vec<String>>();
+
+        format!("[{}]", Self::join(formatted_players, ","))
+    }
+
+    fn join<S: ToString>(vec: Vec<S>, sep: &str) -> String {
+        vec
+            .iter()
+            .fold("".to_string(), |a, b| if a.len() > 0 { a + sep } else { a } + &b.to_string())
     }
 }

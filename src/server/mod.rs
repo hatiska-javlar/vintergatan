@@ -1,4 +1,5 @@
 mod command;
+mod player;
 mod server;
 
 use server::server::Server;
