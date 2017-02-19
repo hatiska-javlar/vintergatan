@@ -9,6 +9,7 @@ use ws::{
 
 use common::position::Position;
 use common::to_command::ToCommand;
+use client::data::PlanetData;
 use client::planet::Planet;
 
 pub enum Command {
@@ -18,7 +19,7 @@ pub enum Command {
 
     Process {
         sender: Sender,
-        planets: Vec<Planet>
+        planets: Vec<PlanetData>
     },
 
     Disconnect {
@@ -38,27 +39,40 @@ impl ToCommand for Command {
         let empty_json_object = Object::new();
         let params = parsed.as_object().unwrap_or(&empty_json_object);
 
-        if let Some(planets_json) = params.get("planets") {
-            let planets = planets_json.as_array().unwrap().into_iter().map(|planet_json| {
-                let id = planet_json.as_object().unwrap().get("id").unwrap().as_u64().unwrap();
-                let x = planet_json.as_object().unwrap().get("x").unwrap().as_f64().unwrap();
-                let y = planet_json.as_object().unwrap().get("y").unwrap().as_f64().unwrap();
+        let process_command = Command::Process {
+            sender: sender,
+            planets: Self::parse_planets_from_json(params.get("planets"))
+        };
 
-                Planet::new(id, Position(x, y))
-            }).collect();
-
-            let process_command = Command::Process {
-                sender: sender,
-                planets: planets
-            };
-
-            return Ok(process_command);
-        }
-
-        Err(())
+        Ok(process_command)
     }
 
     fn disconnect(sender: Sender) -> Self {
         Command::Disconnect { sender: sender }
+    }
+}
+
+impl Command {
+    fn parse_planets_from_json(planets_json: Option<&Json>) -> Vec<PlanetData> {
+        planets_json
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|planet_json| {
+                let planet_json_object = planet_json.as_object().unwrap();
+
+                let id = planet_json_object.get("id").unwrap().as_u64().unwrap();
+                let x = planet_json_object.get("x").unwrap().as_f64().unwrap();
+                let y = planet_json_object.get("y").unwrap().as_f64().unwrap();
+                let owner = planet_json_object.get("owner").unwrap().as_u64().map(|owner| owner as usize);
+
+                PlanetData {
+                    id: id,
+                    position: Position(x, y),
+                    owner: owner
+                }
+            })
+            .collect()
     }
 }

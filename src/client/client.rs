@@ -11,6 +11,7 @@ use ws::connect;
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
+use client::data::PlanetData;
 use client::planet::Planet;
 use common::id::Id;
 use common::position::Position;
@@ -110,12 +111,16 @@ impl Client {
             while let Ok(command) = rx.try_recv() {
                 match command {
                     Command::Process { sender, planets } => {
-                        for planet in planets {
-                            let planet_id = planet.id();
-
-                            if !self.planets.contains_key(&planet_id) {
-                                self.planets.insert(planet_id, planet);
+                        for planetData in planets {
+                            if let Some(planet) = self.planets.get_mut(&planetData.id) {
+                                planet.set_owner(planetData.owner);
+                                continue;
                             }
+
+                            let PlanetData { id, position, owner } = planetData;
+                            let planet = Planet::new(id, position, owner);
+
+                            self.planets.insert(id, planet);
                         }
                     },
                     _ => { }
