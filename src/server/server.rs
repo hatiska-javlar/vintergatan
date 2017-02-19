@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::mpsc::{
     channel,
     Receiver as ChannelReceiver
@@ -30,13 +31,15 @@ use ws::{
     Sender
 };
 
+use common::id::Id;
+use common::position::Position;
 use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
 use server::player::{Player, PlayerId};
-use planet::PlanetServer;
+use server::planet::Planet;
 
 pub struct Server {
-    planets: HashMap<u64, PlanetServer>,
+    planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>
 }
 
@@ -100,7 +103,7 @@ impl Server {
         }
     }
 
-    fn generate_planets() -> HashMap<u64, PlanetServer> {
+    fn generate_planets() -> HashMap<Id, Planet> {
         let half_window_width = 640;
         let half_window_height = 400;
         let planets_density = 1.0;
@@ -131,12 +134,9 @@ impl Server {
         let mut planets = HashMap::new();
         for i in 0..(max_planets_count as f64 * planets_density) as usize {
             let id = random::<u64>();
-            let planet = PlanetServer {
-                id: id,
-                x: grid_x_coordinates[i],
-                y: grid_y_coordinates[i]
-            };
+            let position = Position(grid_x_coordinates[i], grid_y_coordinates[i]);
 
+            let planet = Planet::new(id, position);
             planets.insert(id, planet);
         }
 
@@ -153,7 +153,13 @@ impl Server {
     fn format_planets_as_json(&self) -> String {
         let formatted_planets = self.planets
             .values()
-            .map(|planet| format!("{{\"id\":{},\"x\":{},\"y\":{}}}", planet.id, planet.x, planet.y))
+            .map(|planet| {
+                let id = planet.id();
+                let Position(x, y) = planet.position();
+                let owner = Self::format_option_as_json(planet.owner());
+
+                format!("{{\"id\":{},\"x\":{},\"y\":{},\"owner\":{}}}", id, x, y, owner)
+            })
             .collect::<Vec<String>>();
 
         format!("[{}]", Self::join(formatted_planets, ","))
@@ -166,6 +172,14 @@ impl Server {
             .collect::<Vec<String>>();
 
         format!("[{}]", Self::join(formatted_players, ","))
+    }
+
+    fn format_option_as_json<T: Display>(option: Option<T>) -> String {
+        if let Some(value) = option {
+            format!("{}", value)
+        } else {
+            "null".to_string()
+        }
     }
 
     fn join<S: ToString>(vec: Vec<S>, sep: &str) -> String {

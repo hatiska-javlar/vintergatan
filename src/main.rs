@@ -17,8 +17,6 @@ mod common;
 mod client;
 mod server;
 
-mod planet;
-
 fn run_server(server_address: Option<String>) -> Option<JoinHandle<()>> {
     if server_address.is_some() {
         println!("Starting server on {}", server_address.unwrap_or("127.0.0.1:9999".to_string()));

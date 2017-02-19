@@ -1,5 +1,6 @@
 mod client;
 mod command;
+mod planet;
 
 use client::client::Client;
 

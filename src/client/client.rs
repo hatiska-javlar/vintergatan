@@ -11,8 +11,11 @@ use ws::connect;
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
+use client::planet::Planet;
+use common::id::Id;
+use common::position::Position;
 use common::websocket_handler::WebsocketHandler;
-use planet::PlanetClient;
+
 
 pub struct Client {
     window: GlutinWindow,
@@ -20,7 +23,7 @@ pub struct Client {
     rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: [f64; 2],
-    planets: HashMap<u64, PlanetClient>
+    planets: HashMap<Id, Planet>
 }
 
 impl Client {
@@ -91,12 +94,13 @@ impl Client {
         self.gl.draw(args.viewport(), |c, gl| {
             clear(SPACE_COLOR, gl);
             for (_, planet) in planets {
+                let Position(planet_x, planet_y) = planet.position();
 
                 let planet_transform = c.transform
                     .trans(center_x, center_y)
-                    .trans(planet.x, -planet.y);
+                    .trans(planet_x, -planet_y);
 
-                ellipse(planet.color, planet_shape, planet_transform, gl);
+                ellipse(planet.color(), planet_shape, planet_transform, gl);
             }
         });
     }
@@ -106,18 +110,12 @@ impl Client {
             while let Ok(command) = rx.try_recv() {
                 match command {
                     Command::Process { sender, planets } => {
-                        let mut client_planets = &mut self.planets;
-
                         for planet in planets {
-                            let id = planet.id;
-                            if let Some(p) = client_planets.get_mut(&id) {
-                                p.x = planet.x;
-                                p.y = planet.y;
+                            let planet_id = planet.id();
 
-                                continue;
+                            if !self.planets.contains_key(&planet_id) {
+                                self.planets.insert(planet_id, planet);
                             }
-
-                            client_planets.insert(id, planet);
                         }
                     },
                     _ => { }
@@ -134,13 +132,16 @@ impl Client {
 
         let planets = &mut self.planets;
         for (_, planet) in planets {
-            let distance = ((planet.x - x).powi(2) + (planet.y - y).powi(2)).sqrt();
+            let Position(planet_x, planet_y) = planet.position();
+            let distance = ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt();
 
-            planet.color = if distance < 10.0 {
+            let color = if distance < 10.0 {
                 [0.870588235, 0.850980392, 0.529411765, 1.0]
             } else {
                 [0.125490196, 0.752941176, 0.870588235, 1.0]
-            }
+            };
+
+            planet.set_color(color);
         }
     }
 }
