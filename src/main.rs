@@ -13,10 +13,9 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+mod common;
 mod client;
 mod server;
-
-mod planet;
 
 fn run_server(server_address: Option<String>) -> Option<JoinHandle<()>> {
     if server_address.is_some() {

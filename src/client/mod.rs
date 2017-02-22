@@ -1,6 +1,9 @@
 mod client;
-mod websocket_client;
-mod client_command;
+mod command;
+mod data;
+mod planet;
+mod player;
+mod squad;
 
 use client::client::Client;
 
