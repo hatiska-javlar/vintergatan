@@ -81,6 +81,20 @@ impl Server {
         while let Ok(command) = rx.try_recv() {
             match command {
                 Command::Connect { sender } => self.add_player(sender),
+                Command::Spawn { sender, planet_id } => {
+                    let player_id = sender.token().as_usize() as PlayerId;
+
+                    let position = self.planets.get(&planet_id).unwrap().position();
+                    let squad_id = random::<u64>();
+
+                    let player = self.players.get_mut(&player_id).unwrap();
+                    let gold = player.gold();
+
+                    if gold >= 10.0 {
+                        player.add_squad(squad_id, position);
+                        player.set_gold(gold - 10.0);
+                    }
+                },
                 _ => { }
             }
         }

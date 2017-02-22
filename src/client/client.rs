@@ -9,7 +9,7 @@ use piston::window::{Window, Size};
 use glutin_window::GlutinWindow;
 use opengl_graphics::{GlGraphics, OpenGL};
 use opengl_graphics::glyph_cache::GlyphCache;
-use ws::connect;
+use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
@@ -32,7 +32,10 @@ pub struct Client {
     cursor_position: [f64; 2],
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
-    gold: f64
+    gold: f64,
+
+    current_selected_planet: Option<Id>,
+    sender: Option<Sender>
 }
 
 impl Client {
@@ -56,7 +59,10 @@ impl Client {
             cursor_position: [0f64, 0f64],
             planets: HashMap::new(),
             players: HashMap::new(),
-            gold: 0.0
+            gold: 0.0,
+
+            current_selected_planet: None,
+            sender: None
         }
     }
 
@@ -86,6 +92,14 @@ impl Client {
                     self.select_planet(cursor_position);
                 }
 
+                Event::Input(Input::Press(Button::Keyboard(Key::B))) => {
+                    if let Some(planet_id) = self.current_selected_planet {
+                        if let Some(ref sender) = self.sender {
+                            sender.send(format!("{{\"spawn\":{}}}", planet_id));
+                        }
+                    }
+                }
+
                 _ => {}
             }
 
@@ -98,10 +112,12 @@ impl Client {
         const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
 
         let planet_shape = ellipse::circle(0.0, 0.0, 10.0);
+        let squad_shape = ellipse::circle(0.0, 0.0, 5.0);
 
         let (center_x, center_y) = ((args.width / 2) as f64, (args.height / 2) as f64);
 
         let planets = &self.planets;
+        let players = &self.players;
         let glyph_cache = &mut self.glyph_cache;
         let gold = self.gold;
 
@@ -117,9 +133,29 @@ impl Client {
                 ellipse(planet.color(), planet_shape, planet_transform, gl);
             }
 
+            for (_, player) in players {
+                for (_, squad) in player.squads() {
+                    let Position(squad_x, squad_y) = squad.position();
+
+                    let squad_transform = c.transform
+                        .trans(center_x, center_y)
+                        .trans(squad_x, -squad_y);
+
+                    ellipse([1.0, 0.0, 0.0, 1.0], squad_shape, squad_transform, gl);
+                    text(
+                        [0.0, 0.0, 0.0, 1.0],
+                        12,
+                        &format!("{}", squad.count()),
+                        glyph_cache,
+                        squad_transform,
+                        gl
+                    );
+                }
+            }
+
             text(
                 [0.870588235, 0.850980392, 0.529411765, 1.0],
-                12,
+                14,
                 &format!("Gold: {}", gold.floor()),
                 glyph_cache,
                 c.transform.trans(5.0, 17.0),
@@ -132,6 +168,9 @@ impl Client {
         if let Some(ref rx) = self.rx {
             while let Ok(command) = rx.try_recv() {
                 match command {
+                    Command::Connect { sender } => {
+                        self.sender = Some(sender);
+                    }
                     Command::Process { sender, planets_data, players, gold } => {
                         for planet_data in planets_data {
                             if let Some(planet) = self.planets.get_mut(&planet_data.id) {
@@ -160,16 +199,19 @@ impl Client {
         let x = cursor[0] - width as f64 / 2.0;
         let y = -cursor[1] + height as f64 / 2.0;
 
+        self.current_selected_planet = None;
+
         let planets = &mut self.planets;
         for (_, planet) in planets {
             let Position(planet_x, planet_y) = planet.position();
             let distance = ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt();
 
-            let color = if distance < 10.0 {
-                [0.870588235, 0.850980392, 0.529411765, 1.0]
-            } else {
-                [0.125490196, 0.752941176, 0.870588235, 1.0]
-            };
+            let mut color = [0.125490196, 0.752941176, 0.870588235, 1.0];
+
+            if distance < 10.0 {
+                color = [0.870588235, 0.850980392, 0.529411765, 1.0];
+                self.current_selected_planet = Some(planet.id());
+            }
 
             planet.set_color(color);
         }
