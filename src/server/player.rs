@@ -11,14 +11,16 @@ pub type PlayerId = usize;
 
 pub struct Player {
     sender: Sender,
-    squads: HashMap<Id, Squad>
+    squads: HashMap<Id, Squad>,
+    gold: f64
 }
 
 impl Player {
     pub fn new(sender: Sender) -> Player {
         Player {
             sender: sender,
-            squads: HashMap::new()
+            squads: HashMap::new(),
+            gold: 0.0
         }
     }
 
@@ -43,5 +45,13 @@ impl Player {
         if let Some(squad) = self.squads.get_mut(&id) {
             squad.set_position(position);
         }
+    }
+
+    pub fn gold(&self) -> f64 {
+        self.gold
+    }
+
+    pub fn set_gold(&mut self, gold: f64) {
+        self.gold = gold;
     }
 }

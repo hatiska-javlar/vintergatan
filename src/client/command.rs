@@ -26,7 +26,8 @@ pub enum Command {
     Process {
         sender: Sender,
         planets_data: Vec<PlanetData>,
-        players: HashMap<PlayerId, Player>
+        players: HashMap<PlayerId, Player>,
+        gold: f64
     },
 
     Disconnect {
@@ -49,7 +50,8 @@ impl ToCommand for Command {
         let process_command = Command::Process {
             sender: sender,
             planets_data: Self::parse_planets_data_from_json(params.get("planets")),
-            players: Self::parse_players_from_json(params.get("players"))
+            players: Self::parse_players_from_json(params.get("players")),
+            gold: params.get("gold").unwrap().as_f64().unwrap()
         };
 
         Ok(process_command)

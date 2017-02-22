@@ -28,7 +28,8 @@ pub struct Client {
 
     cursor_position: [f64; 2],
     planets: HashMap<Id, Planet>,
-    players: HashMap<PlayerId, Player>
+    players: HashMap<PlayerId, Player>,
+    gold: f64
 }
 
 impl Client {
@@ -50,7 +51,8 @@ impl Client {
 
             cursor_position: [0f64, 0f64],
             planets: HashMap::new(),
-            players: HashMap::new()
+            players: HashMap::new(),
+            gold: 0.0
         }
     }
 
@@ -115,7 +117,7 @@ impl Client {
         if let Some(ref rx) = self.rx {
             while let Ok(command) = rx.try_recv() {
                 match command {
-                    Command::Process { sender, planets_data, players } => {
+                    Command::Process { sender, planets_data, players, gold } => {
                         for planet_data in planets_data {
                             if let Some(planet) = self.planets.get_mut(&planet_data.id) {
                                 planet.set_owner(planet_data.owner);
@@ -129,6 +131,7 @@ impl Client {
                         }
 
                         self.players = players;
+                        self.gold = gold;
                     },
                     _ => { }
                 }

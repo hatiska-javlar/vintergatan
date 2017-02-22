@@ -86,7 +86,12 @@ impl Server {
         }
     }
 
-    fn update(&mut self, args: &UpdateArgs) { }
+    fn update(&mut self, args: &UpdateArgs) {
+        for (_, player) in &mut self.players {
+            let gold = player.gold() + 1.0 * args.dt;
+            player.set_gold(gold);
+        }
+    }
 
     fn render(&mut self, args: &RenderArgs) {
         let planets_json = self.format_planets_as_json();
@@ -95,10 +100,11 @@ impl Server {
         let players = self.players.values();
         for player in players {
             let message_json = format!(
-                "{{\"planets\":{},\"players\":{},\"id\":{}}}",
+                "{{\"planets\":{},\"players\":{},\"id\":{},\"gold\":{}}}",
                 planets_json,
                 players_json,
-                player.id()
+                player.id(),
+                player.gold()
             );
 
             player.send(message_json);
