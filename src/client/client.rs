@@ -1,5 +1,6 @@
 use std::thread;
 use std::collections::HashMap;
+use std::env::current_dir;
 
 use piston::window::WindowSettings;
 use piston::event_loop::*;
@@ -7,6 +8,7 @@ use piston::input::*;
 use piston::window::{Window, Size};
 use glutin_window::GlutinWindow;
 use opengl_graphics::{GlGraphics, OpenGL};
+use opengl_graphics::glyph_cache::GlyphCache;
 use ws::connect;
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
@@ -24,6 +26,7 @@ use common::websocket_handler::WebsocketHandler;
 pub struct Client {
     window: GlutinWindow,
     gl: GlGraphics,
+    glyph_cache: GlyphCache<'static>,
     rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: [f64; 2],
@@ -47,6 +50,7 @@ impl Client {
         Client {
             window: window,
             gl: gl,
+            glyph_cache: GlyphCache::new(current_dir().unwrap().join("assets/Exo2-Regular.ttf")).unwrap(),
             rx: None,
 
             cursor_position: [0f64, 0f64],
@@ -98,6 +102,8 @@ impl Client {
         let (center_x, center_y) = ((args.width / 2) as f64, (args.height / 2) as f64);
 
         let planets = &self.planets;
+        let glyph_cache = &mut self.glyph_cache;
+        let gold = self.gold;
 
         self.gl.draw(args.viewport(), |c, gl| {
             clear(SPACE_COLOR, gl);
@@ -110,6 +116,15 @@ impl Client {
 
                 ellipse(planet.color(), planet_shape, planet_transform, gl);
             }
+
+            text(
+                [0.870588235, 0.850980392, 0.529411765, 1.0],
+                12,
+                &format!("Gold: {}", gold.floor()),
+                glyph_cache,
+                c.transform.trans(5.0, 17.0),
+                gl
+            );
         });
     }
 
