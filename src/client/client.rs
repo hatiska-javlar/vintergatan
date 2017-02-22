@@ -11,9 +11,12 @@ use ws::connect;
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
-use client::data::PlanetData;
+use client::data::{PlanetData, PlayerData, SquadData};
 use client::planet::Planet;
+use client::player::Player;
+use client::squad::Squad;
 use common::id::Id;
+use common::PlayerId;
 use common::position::Position;
 use common::websocket_handler::WebsocketHandler;
 
@@ -24,7 +27,8 @@ pub struct Client {
     rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: [f64; 2],
-    planets: HashMap<Id, Planet>
+    planets: HashMap<Id, Planet>,
+    players: HashMap<PlayerId, Player>
 }
 
 impl Client {
@@ -45,7 +49,8 @@ impl Client {
             rx: None,
 
             cursor_position: [0f64, 0f64],
-            planets: HashMap::new()
+            planets: HashMap::new(),
+            players: HashMap::new()
         }
     }
 
@@ -110,18 +115,20 @@ impl Client {
         if let Some(ref rx) = self.rx {
             while let Ok(command) = rx.try_recv() {
                 match command {
-                    Command::Process { sender, planets } => {
-                        for planetData in planets {
-                            if let Some(planet) = self.planets.get_mut(&planetData.id) {
-                                planet.set_owner(planetData.owner);
+                    Command::Process { sender, planets_data, players } => {
+                        for planet_data in planets_data {
+                            if let Some(planet) = self.planets.get_mut(&planet_data.id) {
+                                planet.set_owner(planet_data.owner);
                                 continue;
                             }
 
-                            let PlanetData { id, position, owner } = planetData;
+                            let PlanetData { id, position, owner } = planet_data;
                             let planet = Planet::new(id, position, owner);
 
                             self.planets.insert(id, planet);
                         }
+
+                        self.players = players;
                     },
                     _ => { }
                 }

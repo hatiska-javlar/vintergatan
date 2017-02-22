@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::collections::HashMap;
+use std::collections::hash_map::Values;
 use std::fmt::Display;
 use std::sync::mpsc::{
     channel,
@@ -37,6 +38,7 @@ use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
 use server::player::{Player, PlayerId};
 use server::planet::Planet;
+use server::squad::Squad;
 
 pub struct Server {
     planets: HashMap<Id, Planet>,
@@ -168,10 +170,30 @@ impl Server {
     fn format_players_as_json(&self) -> String {
         let formatted_players = self.players
             .values()
-            .map(|player| format!("{{\"id\":{}}}", player.id()))
+            .map(|player| {
+                format!(
+                    "{{\"id\":{},\"squads\":{}}}",
+                    player.id(),
+                    Self::format_squads_as_json(player.squads())
+                )
+            })
             .collect::<Vec<String>>();
 
         format!("[{}]", Self::join(formatted_players, ","))
+    }
+
+    fn format_squads_as_json(squads: Values<Id, Squad>) -> String {
+        let formatted_squads = squads
+            .map(|squad| {
+                let id = squad.id();
+                let Position(x, y) = squad.position();
+                let count = squad.count();
+
+                format!("{{\"id\":{},\"x\":{},\"y\":{},\"count\":{}}}", id, x, y, count)
+            })
+            .collect::<Vec<String>>();
+
+        format!("[{}]", Self::join(formatted_squads, ","))
     }
 
     fn format_option_as_json<T: Display>(option: Option<T>) -> String {

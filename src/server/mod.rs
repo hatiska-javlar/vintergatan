@@ -2,6 +2,7 @@ mod command;
 mod planet;
 mod player;
 mod server;
+mod squad;
 
 use server::server::Server;
 

@@ -2,6 +2,8 @@ mod client;
 mod command;
 mod data;
 mod planet;
+mod player;
+mod squad;
 
 use client::client::Client;
 
