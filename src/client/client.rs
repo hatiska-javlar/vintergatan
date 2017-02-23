@@ -35,6 +35,7 @@ pub struct Client {
     gold: f64,
 
     current_selected_planet: Option<Id>,
+    current_selected_squad: Option<Id>,
     sender: Option<Sender>
 }
 
@@ -62,6 +63,7 @@ impl Client {
             gold: 0.0,
 
             current_selected_planet: None,
+            current_selected_squad: None,
             sender: None
         }
     }
@@ -87,9 +89,25 @@ impl Client {
             }
 
             match e {
-                Event::Input(Input::Press(Button::Mouse(_))) => {
+                Event::Input(Input::Press(Button::Mouse(MouseButton::Left))) => {
                     let cursor_position = self.cursor_position;
                     self.select_planet(cursor_position);
+                    self.select_squad(cursor_position);
+                }
+
+                Event::Input(Input::Press(Button::Mouse(MouseButton::Right))) => {
+                    if let Some(squad_id) = self.current_selected_squad {
+                        let cursor_position = self.cursor_position;
+
+                        let Size { width, height } = self.window.size();
+
+                        let x = cursor_position[0] - width as f64 / 2.0;
+                        let y = -cursor_position[1] + height as f64 / 2.0;
+
+                        if let Some(ref sender) = self.sender {
+                            sender.send(format!("{{\"move\":{},\"x\":{},\"y\":{}}}", squad_id, x, y));
+                        }
+                    }
                 }
 
                 Event::Input(Input::Press(Button::Keyboard(Key::B))) => {
@@ -214,6 +232,27 @@ impl Client {
             }
 
             planet.set_color(color);
+        }
+    }
+
+    fn select_squad(&mut self, cursor: [f64; 2]) {
+        let Size { width, height } = self.window.size();
+
+        let x = cursor[0] - width as f64 / 2.0;
+        let y = -cursor[1] + height as f64 / 2.0;
+
+        self.current_selected_squad = None;
+
+        let players = &self.players;
+        for (_, player) in players {
+            for (_, squad) in player.squads() {
+                let Position(squad_x, squad_y) = squad.position();
+                let distance = ((squad_x - x).powi(2) + (squad_y - y).powi(2)).sqrt();
+
+                if distance < 5.0 {
+                    self.current_selected_squad = Some(squad.id());
+                }
+            }
         }
     }
 }
