@@ -21,6 +21,13 @@ pub enum Command {
         planet_id: Id
     },
 
+    Move {
+        sender: Sender,
+        squad_id: Id,
+        x: f64,
+        y: f64
+    },
+
     Disconnect {
         sender: Sender
     }
@@ -40,6 +47,15 @@ impl ToCommand for Command {
 
         if let Some(planet_id) = params.get("spawn") {
             return Ok(Command::Spawn { sender: sender, planet_id: planet_id.as_u64().unwrap() });
+        }
+
+        if let Some(squad_id) = params.get("move") {
+            return Ok(Command::Move {
+                sender: sender,
+                squad_id: squad_id.as_u64().unwrap(),
+                x: params.get("x").unwrap().as_f64().unwrap(),
+                y: params.get("y").unwrap().as_f64().unwrap()
+            });
         }
 
         Ok(Command::Process { sender: sender })

@@ -81,6 +81,12 @@ impl Server {
         while let Ok(command) = rx.try_recv() {
             match command {
                 Command::Connect { sender } => self.add_player(sender),
+                Command::Move { sender, squad_id, x, y } => {
+                    let player_id = sender.token().as_usize() as PlayerId;
+
+                    let mut player = self.players.get_mut(&player_id).unwrap();
+                    player.move_squad(squad_id, Position(x, y));
+                },
                 Command::Spawn { sender, planet_id } => {
                     let player_id = sender.token().as_usize() as PlayerId;
 
