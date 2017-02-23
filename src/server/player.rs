@@ -36,6 +36,10 @@ impl Player {
         self.squads.values()
     }
 
+    pub fn squads_mut(&mut self) -> &mut HashMap<Id, Squad> {
+        &mut self.squads
+    }
+
     pub fn add_squad(&mut self, id: Id, position: Position) {
         let squad = Squad::new(id, position);
         self.squads.insert(squad.id(), squad);
@@ -43,7 +47,7 @@ impl Player {
 
     pub fn move_squad(&mut self, id: Id, position: Position) {
         if let Some(squad) = self.squads.get_mut(&id) {
-            squad.set_position(position);
+            squad.move_to(position);
         }
     }
 

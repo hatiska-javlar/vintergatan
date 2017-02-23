@@ -38,7 +38,7 @@ use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
 use server::player::{Player, PlayerId};
 use server::planet::Planet;
-use server::squad::Squad;
+use server::squad::{Squad, SquadState};
 
 pub struct Server {
     planets: HashMap<Id, Planet>,
@@ -110,6 +110,34 @@ impl Server {
         for (_, player) in &mut self.players {
             let gold = player.gold() + 1.0 * args.dt;
             player.set_gold(gold);
+
+            for (_, squad) in player.squads_mut() {
+                match squad.state() {
+                    SquadState::Pending => {},
+                    SquadState::Moving { destination } => {
+                        let Position(x, y) = squad.position();
+                        let Position(destination_x, destination_y) = destination;
+
+                        let target = (destination_x - x, destination_y - y);
+                        let distance = (target.0.powi(2) + target.1.powi(2)).sqrt();
+
+                        let max_step_distance = 50_f64 * args.dt;
+
+                        if distance < max_step_distance {
+                            squad.set_state(SquadState::Pending);
+                            squad.set_position(Position(destination_x, destination_y));
+                        } else {
+                            let direction = (target.0 / distance, target.1 / distance);
+                            let position = Position(
+                                x + max_step_distance * direction.0,
+                                y + max_step_distance * direction.1
+                            );
+
+                            squad.set_position(position);
+                        }
+                    },
+                }
+            }
         }
     }
 
