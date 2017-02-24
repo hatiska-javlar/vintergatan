@@ -84,21 +84,29 @@ impl Server {
                 Command::Move { sender, squad_id, x, y } => {
                     let player_id = sender.token().as_usize() as PlayerId;
 
+                    let position = Self::find_planet_by_position(&self.planets, Position(x, y))
+                        .map_or(Position(x, y), |planet| planet.position());
+
                     let mut player = self.players.get_mut(&player_id).unwrap();
-                    player.move_squad(squad_id, Position(x, y));
+                    player.move_squad(squad_id, position);
                 },
                 Command::Spawn { sender, planet_id } => {
                     let player_id = sender.token().as_usize() as PlayerId;
-
-                    let position = self.planets.get(&planet_id).unwrap().position();
-                    let squad_id = random::<u64>();
-
                     let player = self.players.get_mut(&player_id).unwrap();
-                    let gold = player.gold();
 
-                    if gold >= 10.0 {
-                        player.add_squad(squad_id, position);
-                        player.set_gold(gold - 10.0);
+                    if let Some(planet) = self.planets.get_mut(&planet_id) {
+                        let is_owner = planet.owner().map_or(false, |owner| owner == player_id);
+
+                        let gold = player.gold();
+                        let has_gold = gold > 10_f64;
+
+                        if is_owner && has_gold {
+                            let squad_id = random::<u64>();
+                            let position = planet.position();
+
+                            player.add_squad(squad_id, position);
+                            player.set_gold(gold - 10.0);
+                        }
                     }
                 },
                 _ => { }
@@ -107,13 +115,19 @@ impl Server {
     }
 
     fn update(&mut self, args: &UpdateArgs) {
-        for (_, player) in &mut self.players {
-            let gold = player.gold() + 1.0 * args.dt;
+        for (player_id, player) in &mut self.players {
+            let planets_count = self.planets
+                .values()
+                .filter(|planet| planet.owner().map_or(false, |owner| *player_id == owner))
+                .count();
+
+            let gold = player.gold() + 1.0 * planets_count as f64 * args.dt;
             player.set_gold(gold);
 
             for (_, squad) in player.squads_mut() {
                 match squad.state() {
                     SquadState::Pending => {},
+
                     SquadState::Moving { destination } => {
                         let Position(x, y) = squad.position();
                         let Position(destination_x, destination_y) = destination;
@@ -124,8 +138,12 @@ impl Server {
                         let max_step_distance = 50_f64 * args.dt;
 
                         if distance < max_step_distance {
-                            squad.set_state(SquadState::Pending);
-                            squad.set_position(Position(destination_x, destination_y));
+                            squad.set_position(destination);
+
+                            let state = Self::find_planet_by_position(&self.planets, destination)
+                                .map_or(SquadState::Pending, |planet| SquadState::OnOrbit { planet_id: planet.id() });
+
+                            squad.set_state(state);
                         } else {
                             let direction = (target.0 / distance, target.1 / distance);
                             let position = Position(
@@ -136,7 +154,28 @@ impl Server {
                             squad.set_position(position);
                         }
                     },
+
+                    SquadState::OnOrbit { .. } => {}
                 }
+            }
+        }
+
+        for (planet_id, planet) in &mut self.planets {
+            let players_on_planet = self.players
+                .values()
+                .filter(|player| {
+                    player.squads().any(|ref squad| {
+                        match squad.state() {
+                            SquadState::OnOrbit { planet_id: id } => *planet_id == id,
+                            _ => false
+                        }
+                    })
+                })
+                .collect::<Vec<&Player>>();
+
+            if players_on_planet.len() == 1 {
+                let owner = players_on_planet.first().map(|player| player.id());
+                planet.set_owner(owner);
             }
         }
     }
@@ -203,7 +242,25 @@ impl Server {
         let player = Player::new(sender);
 
         let ref mut players = self.players;
-        players.insert(player.id(), player);
+
+        let player_id = player.id();
+        players.insert(player_id, player);
+
+        let planet = self.planets.values_mut().find(|planet| planet.owner().is_none());
+        if let Some(planet) = planet {
+            planet.set_owner(Some(player_id));
+        }
+    }
+
+    fn find_planet_by_position(planets: &HashMap<Id, Planet>, position: Position) -> Option<&Planet> {
+        let Position(x, y) = position;
+
+        planets
+            .values()
+            .find(|planet| {
+                let Position(planet_x, planet_y) = planet.position();
+                ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt() < 10_f64
+            })
     }
 
     fn format_planets_as_json(&self) -> String {

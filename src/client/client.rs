@@ -31,6 +31,7 @@ pub struct Client {
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
     gold: f64,
+    me: PlayerId,
 
     current_selected_planet: Option<Id>,
     current_selected_squad: Option<Id>,
@@ -59,6 +60,7 @@ impl Client {
             planets: HashMap::new(),
             players: HashMap::new(),
             gold: 0.0,
+            me: 0,
 
             current_selected_planet: None,
             current_selected_squad: None,
@@ -130,6 +132,7 @@ impl Client {
         const TEXT_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 1.0];
         const SELECTION_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 0.2];
         const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
+        const MY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.50588235, 0.35686275, 1.0];
         const SQUAD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
         const HIGHLIGHT_COLOR:[f32; 4] = [1.0, 1.0, 1.0, 0.5];
 
@@ -142,6 +145,7 @@ impl Client {
         let players = &self.players;
         let glyph_cache = &mut self.glyph_cache;
         let gold = self.gold;
+        let me = self.me;
 
         let current_selected_planet = self.current_selected_planet;
         let current_selected_squad = self.current_selected_squad;
@@ -155,7 +159,15 @@ impl Client {
                     .trans(center_x, center_y)
                     .trans(planet_x, -planet_y);
 
-                ellipse(PLANET_COLOR, planet_shape, planet_transform, gl);
+                let is_my_planet = planet.owner().map_or(false, |owner| owner == me);
+                let planet_color = if is_my_planet {
+                    MY_PLANET_COLOR
+                } else {
+                    PLANET_COLOR
+                };
+
+                ellipse(planet_color, planet_shape, planet_transform, gl);
+
                 if let Some(current_selected_planet) = current_selected_planet {
                     if planet.id() == current_selected_planet {
                         ellipse(HIGHLIGHT_COLOR, planet_shape, planet_transform, gl);
@@ -201,6 +213,16 @@ impl Client {
                 c.transform.trans(5.0, 17.0),
                 gl
             );
+
+            text(
+                GOLD_COLOR,
+                14,
+                &format!("Planets: {}", planets.values().filter(|&planet|
+                    planet.owner().map_or(false, |owner| owner == me)).count()),
+                glyph_cache,
+                c.transform.trans(100.0, 17.0),
+                gl
+            );
         });
     }
 
@@ -211,10 +233,11 @@ impl Client {
                     Command::Connect { sender } => {
                         self.sender = Some(sender);
                     }
-                    Command::Process { sender, planets, players, gold } => {
+                    Command::Process { sender, planets, players, gold, me } => {
                         self.planets = planets;
                         self.players = players;
                         self.gold = gold;
+                        self.me = me;
                     },
                     _ => { }
                 }
