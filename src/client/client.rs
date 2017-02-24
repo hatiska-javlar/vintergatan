@@ -13,10 +13,8 @@ use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
-use client::data::{PlanetData, PlayerData, SquadData};
 use client::planet::Planet;
 use client::player::Player;
-use client::squad::Squad;
 use common::id::Id;
 use common::PlayerId;
 use common::position::Position;
@@ -128,6 +126,12 @@ impl Client {
         use graphics::*;
 
         const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
+        const GOLD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
+        const TEXT_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 1.0];
+        const SELECTION_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 0.2];
+        const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
+        const SQUAD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
+        const HIGHLIGHT_COLOR:[f32; 4] = [1.0, 1.0, 1.0, 0.5];
 
         let planet_shape = ellipse::circle(0.0, 0.0, 10.0);
         let squad_shape = ellipse::circle(0.0, 0.0, 5.0);
@@ -139,6 +143,9 @@ impl Client {
         let glyph_cache = &mut self.glyph_cache;
         let gold = self.gold;
 
+        let current_selected_planet = self.current_selected_planet;
+        let current_selected_squad = self.current_selected_squad;
+
         self.gl.draw(args.viewport(), |c, gl| {
             clear(SPACE_COLOR, gl);
             for (_, planet) in planets {
@@ -148,7 +155,14 @@ impl Client {
                     .trans(center_x, center_y)
                     .trans(planet_x, -planet_y);
 
-                ellipse(planet.color(), planet_shape, planet_transform, gl);
+                ellipse(PLANET_COLOR, planet_shape, planet_transform, gl);
+                if let Some(current_selected_planet) = current_selected_planet {
+                    if planet.id() == current_selected_planet {
+                        ellipse(HIGHLIGHT_COLOR, planet_shape, planet_transform, gl);
+                        Rectangle::new_border(SELECTION_COLOR, 1.0)
+                            .draw([-15.0, -15.0, 30.0, 30.0], &c.draw_state, planet_transform, gl);
+                    }
+                }
             }
 
             for (_, player) in players {
@@ -159,9 +173,17 @@ impl Client {
                         .trans(center_x, center_y)
                         .trans(squad_x, -squad_y);
 
-                    ellipse([1.0, 0.0, 0.0, 1.0], squad_shape, squad_transform, gl);
+                    ellipse(SQUAD_COLOR, squad_shape, squad_transform, gl);
+                    if let Some(current_selected_squad) = current_selected_squad {
+                        if squad.id() == current_selected_squad {
+                            ellipse(HIGHLIGHT_COLOR, squad_shape, squad_transform, gl);
+                            Rectangle::new_border(SELECTION_COLOR, 1.0)
+                                .draw([-10.0, -10.0, 20.0, 20.0], &c.draw_state, squad_transform, gl);
+                        }
+                    }
+
                     text(
-                        [0.0, 0.0, 0.0, 1.0],
+                        TEXT_COLOR,
                         12,
                         &format!("{}", squad.count()),
                         glyph_cache,
@@ -172,7 +194,7 @@ impl Client {
             }
 
             text(
-                [0.870588235, 0.850980392, 0.529411765, 1.0],
+                GOLD_COLOR,
                 14,
                 &format!("Gold: {}", gold.floor()),
                 glyph_cache,
@@ -189,19 +211,8 @@ impl Client {
                     Command::Connect { sender } => {
                         self.sender = Some(sender);
                     }
-                    Command::Process { sender, planets_data, players, gold } => {
-                        for planet_data in planets_data {
-                            if let Some(planet) = self.planets.get_mut(&planet_data.id) {
-                                planet.set_owner(planet_data.owner);
-                                continue;
-                            }
-
-                            let PlanetData { id, position, owner } = planet_data;
-                            let planet = Planet::new(id, position, owner);
-
-                            self.planets.insert(id, planet);
-                        }
-
+                    Command::Process { sender, planets, players, gold } => {
+                        self.planets = planets;
                         self.players = players;
                         self.gold = gold;
                     },
@@ -224,14 +235,9 @@ impl Client {
             let Position(planet_x, planet_y) = planet.position();
             let distance = ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt();
 
-            let mut color = [0.125490196, 0.752941176, 0.870588235, 1.0];
-
-            if distance < 10.0 {
-                color = [0.870588235, 0.850980392, 0.529411765, 1.0];
+            if distance < 20.0 {
                 self.current_selected_planet = Some(planet.id());
             }
-
-            planet.set_color(color);
         }
     }
 
@@ -249,7 +255,7 @@ impl Client {
                 let Position(squad_x, squad_y) = squad.position();
                 let distance = ((squad_x - x).powi(2) + (squad_y - y).powi(2)).sqrt();
 
-                if distance < 5.0 {
+                if distance < 10.0 {
                     self.current_selected_squad = Some(squad.id());
                 }
             }

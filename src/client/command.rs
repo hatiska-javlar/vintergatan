@@ -13,7 +13,6 @@ use common::PlayerId;
 use common::id::Id;
 use common::position::Position;
 use common::to_command::ToCommand;
-use client::data::PlanetData;
 use client::planet::Planet;
 use client::player::Player;
 use client::squad::Squad;
@@ -25,7 +24,7 @@ pub enum Command {
 
     Process {
         sender: Sender,
-        planets_data: Vec<PlanetData>,
+        planets: HashMap<Id, Planet>,
         players: HashMap<PlayerId, Player>,
         gold: f64
     },
@@ -49,7 +48,7 @@ impl ToCommand for Command {
 
         let process_command = Command::Process {
             sender: sender,
-            planets_data: Self::parse_planets_data_from_json(params.get("planets")),
+            planets: Self::parse_planets_from_json(params.get("planets")),
             players: Self::parse_players_from_json(params.get("players")),
             gold: params.get("gold").unwrap().as_f64().unwrap()
         };
@@ -63,27 +62,24 @@ impl ToCommand for Command {
 }
 
 impl Command {
-    fn parse_planets_data_from_json(planets_json: Option<&Json>) -> Vec<PlanetData> {
-        planets_json
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .into_iter()
-            .map(|planet_json| {
-                let planet_json_object = planet_json.as_object().unwrap();
+    fn parse_planets_from_json(planets_json: Option<&Json>) -> HashMap<Id, Planet> {
+        let planets_json_array = planets_json.unwrap().as_array().unwrap();
 
-                let id = planet_json_object.get("id").unwrap().as_u64().unwrap();
-                let x = planet_json_object.get("x").unwrap().as_f64().unwrap();
-                let y = planet_json_object.get("y").unwrap().as_f64().unwrap();
-                let owner = planet_json_object.get("owner").unwrap().as_u64().map(|owner| owner as usize);
+        let mut planets = HashMap::new();
+        for planet_json in planets_json_array.into_iter() {
+            let planet_json_object = planet_json.as_object().unwrap();
 
-                PlanetData {
-                    id: id,
-                    position: Position(x, y),
-                    owner: owner
-                }
-            })
-            .collect()
+            let id = planet_json_object.get("id").unwrap().as_u64().unwrap();
+            let x = planet_json_object.get("x").unwrap().as_f64().unwrap();
+            let y = planet_json_object.get("y").unwrap().as_f64().unwrap();
+            let position = Position(x, y);
+            let owner = planet_json_object.get("owner").unwrap().as_u64().map(|owner| owner as PlayerId);
+
+            let planet = Planet::new(id, position, owner);
+            planets.insert(id, planet);
+        }
+
+        planets
     }
 
     fn parse_players_from_json(players_json: Option<&Json>) -> HashMap<PlayerId, Player> {
