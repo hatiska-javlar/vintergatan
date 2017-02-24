@@ -26,7 +26,8 @@ pub enum Command {
         sender: Sender,
         planets: HashMap<Id, Planet>,
         players: HashMap<PlayerId, Player>,
-        gold: f64
+        gold: f64,
+        me: PlayerId
     },
 
     Disconnect {
@@ -50,7 +51,8 @@ impl ToCommand for Command {
             sender: sender,
             planets: Self::parse_planets_from_json(params.get("planets")),
             players: Self::parse_players_from_json(params.get("players")),
-            gold: params.get("gold").unwrap().as_f64().unwrap()
+            gold: params.get("gold").unwrap().as_f64().unwrap(),
+            me: params.get("id").unwrap().as_f64().unwrap() as PlayerId
         };
 
         Ok(process_command)

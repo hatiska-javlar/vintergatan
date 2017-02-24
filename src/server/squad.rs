@@ -13,6 +13,9 @@ pub enum SquadState {
     Pending,
     Moving {
         destination: Position
+    },
+    OnOrbit {
+        planet_id: Id
     }
 }
 
