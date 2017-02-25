@@ -31,11 +31,10 @@ use ws::{
     Sender
 };
 
-use common::id::Id;
-use common::position::Position;
+use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
-use server::player::{Player, PlayerId};
+use server::player::Player;
 use server::planet::Planet;
 use server::squad::{Squad, SquadState};
 

@@ -1,11 +1,6 @@
-use std::collections::HashMap;
-
 use ws::Sender;
 
-use common::id::Id;
-use common::position::Position;
-
-pub type PlayerId = usize;
+use common::PlayerId;
 
 pub struct Player {
     sender: Sender,

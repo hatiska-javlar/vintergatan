@@ -16,11 +16,8 @@ use client::command::Command;
 use client::planet::Planet;
 use client::player::Player;
 use client::squad::Squad;
-use common::id::Id;
-use common::PlayerId;
-use common::position::Position;
+use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
-
 
 pub struct Client {
     window: GlutinWindow,

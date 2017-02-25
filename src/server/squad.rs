@@ -1,6 +1,4 @@
-use common::id::Id;
-use common::PlayerId;
-use common::position::Position;
+use common::{Id, PlayerId, Position};
 
 pub struct Squad {
     id: Id,

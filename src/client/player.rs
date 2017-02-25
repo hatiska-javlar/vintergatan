@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-use common::id::Id;
 use common::PlayerId;
 
 pub struct Player {

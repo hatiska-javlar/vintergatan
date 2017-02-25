@@ -9,9 +9,7 @@ use ws::{
     Sender
 };
 
-use common::PlayerId;
-use common::id::Id;
-use common::position::Position;
+use common::{Id, PlayerId, Position};
 use common::to_command::ToCommand;
 use client::planet::Planet;
 use client::player::Player;

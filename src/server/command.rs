@@ -5,7 +5,7 @@ use ws::{
 };
 
 use common::to_command::ToCommand;
-use common::id::Id;
+use common::Id;
 
 pub enum Command {
     Connect {
