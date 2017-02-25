@@ -1,16 +1,19 @@
 use common::id::Id;
+use common::PlayerId;
 use common::position::Position;
 
 pub struct Squad {
     id: Id,
+    owner: PlayerId,
     position: Position,
     count: u64
 }
 
 impl Squad {
-    pub fn new(id: Id, position: Position, count: u64) -> Squad {
+    pub fn new(id: Id, owner: PlayerId, position: Position, count: u64) -> Squad {
         Squad {
             id: id,
+            owner: owner,
             position: position,
             count: count
         }
@@ -18,6 +21,10 @@ impl Squad {
 
     pub fn id(&self) -> Id {
         self.id
+    }
+
+    pub fn owner(&self) -> PlayerId {
+        self.owner
     }
 
     pub fn position(&self) -> Position {

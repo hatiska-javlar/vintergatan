@@ -1,8 +1,10 @@
 use common::id::Id;
+use common::PlayerId;
 use common::position::Position;
 
 pub struct Squad {
     id: Id,
+    owner: PlayerId,
     state: SquadState,
     position: Position,
     count: u64
@@ -20,9 +22,10 @@ pub enum SquadState {
 }
 
 impl Squad {
-    pub fn new(id: Id, position: Position) -> Squad {
+    pub fn new(id: Id, owner: PlayerId, position: Position) -> Squad {
         Squad {
             id: id,
+            owner: owner,
             state: SquadState::Pending,
             position: position,
             count: 10
@@ -31,6 +34,10 @@ impl Squad {
 
     pub fn id(&self) -> Id {
         self.id
+    }
+
+    pub fn owner(&self) -> PlayerId {
+        self.owner
     }
 
     pub fn state(&self) -> SquadState {
@@ -59,5 +66,12 @@ impl Squad {
 
     pub fn move_to(&mut self, position: Position) {
         self.state = SquadState::Moving { destination: position };
+    }
+
+    pub fn is_on_orbit(&self, orbit_planet_id: Id) -> bool {
+        match self.state {
+            SquadState::OnOrbit { planet_id } => planet_id == orbit_planet_id,
+            _ => false
+        }
     }
 }

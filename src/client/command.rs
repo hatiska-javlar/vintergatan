@@ -26,6 +26,7 @@ pub enum Command {
         sender: Sender,
         planets: HashMap<Id, Planet>,
         players: HashMap<PlayerId, Player>,
+        squads: HashMap<Id, Squad>,
         gold: f64,
         me: PlayerId
     },
@@ -51,6 +52,7 @@ impl ToCommand for Command {
             sender: sender,
             planets: Self::parse_planets_from_json(params.get("planets")),
             players: Self::parse_players_from_json(params.get("players")),
+            squads: Self::parse_squads_from_json(params.get("squads")),
             gold: params.get("gold").unwrap().as_f64().unwrap(),
             me: params.get("id").unwrap().as_f64().unwrap() as PlayerId
         };
@@ -90,11 +92,9 @@ impl Command {
         let mut players = HashMap::new();
         for player_json in players_json_array.into_iter() {
             let player_json_object = player_json.as_object().unwrap();
-
             let id = player_json_object.get("id").unwrap().as_u64().unwrap() as PlayerId;
-            let squads = Self::parse_squads_from_json(player_json_object.get("squads"));
 
-            let player = Player::new(id, squads);
+            let player = Player::new(id);
             players.insert(id, player);
         }
 
@@ -109,11 +109,12 @@ impl Command {
             let squad_json_object = squad_json.as_object().unwrap();
 
             let id = squad_json_object.get("id").unwrap().as_u64().unwrap() as Id;
+            let owner = squad_json_object.get("owner").unwrap().as_u64().unwrap() as PlayerId;
             let x = squad_json_object.get("x").unwrap().as_f64().unwrap();
             let y = squad_json_object.get("y").unwrap().as_f64().unwrap();
             let count = squad_json_object.get("count").unwrap().as_u64().unwrap();
 
-            let squad = Squad::new(id, Position(x, y), count);
+            let squad = Squad::new(id, owner, Position(x, y), count);
             squads.insert(id, squad);
         }
 

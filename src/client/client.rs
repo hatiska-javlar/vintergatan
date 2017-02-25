@@ -15,6 +15,7 @@ use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 use client::command::Command;
 use client::planet::Planet;
 use client::player::Player;
+use client::squad::Squad;
 use common::id::Id;
 use common::PlayerId;
 use common::position::Position;
@@ -30,6 +31,7 @@ pub struct Client {
     cursor_position: [f64; 2],
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
+    squads: HashMap<Id, Squad>,
     gold: f64,
     me: PlayerId,
 
@@ -59,6 +61,7 @@ impl Client {
             cursor_position: [0f64, 0f64],
             planets: HashMap::new(),
             players: HashMap::new(),
+            squads: HashMap::new(),
             gold: 0.0,
             me: 0,
 
@@ -143,6 +146,7 @@ impl Client {
 
         let planets = &self.planets;
         let players = &self.players;
+        let squads = &self.squads;
         let glyph_cache = &mut self.glyph_cache;
         let gold = self.gold;
         let me = self.me;
@@ -177,32 +181,31 @@ impl Client {
                 }
             }
 
-            for (_, player) in players {
-                for (_, squad) in player.squads() {
-                    let Position(squad_x, squad_y) = squad.position();
+            for squad in squads.values() {
+                let Position(squad_x, squad_y) = squad.position();
 
-                    let squad_transform = c.transform
-                        .trans(center_x, center_y)
-                        .trans(squad_x, -squad_y);
+                let squad_transform = c.transform
+                    .trans(center_x, center_y)
+                    .trans(squad_x, -squad_y);
 
-                    ellipse(SQUAD_COLOR, squad_shape, squad_transform, gl);
-                    if let Some(current_selected_squad) = current_selected_squad {
-                        if squad.id() == current_selected_squad {
-                            ellipse(HIGHLIGHT_COLOR, squad_shape, squad_transform, gl);
-                            Rectangle::new_border(SELECTION_COLOR, 1.0)
-                                .draw([-10.0, -10.0, 20.0, 20.0], &c.draw_state, squad_transform, gl);
-                        }
+                ellipse(SQUAD_COLOR, squad_shape, squad_transform, gl);
+
+                if let Some(current_selected_squad) = current_selected_squad {
+                    if squad.id() == current_selected_squad {
+                        ellipse(HIGHLIGHT_COLOR, squad_shape, squad_transform, gl);
+                        Rectangle::new_border(SELECTION_COLOR, 1.0)
+                            .draw([-10.0, -10.0, 20.0, 20.0], &c.draw_state, squad_transform, gl);
                     }
-
-                    text(
-                        TEXT_COLOR,
-                        12,
-                        &format!("{}", squad.count()),
-                        glyph_cache,
-                        squad_transform,
-                        gl
-                    );
                 }
+
+                text(
+                    TEXT_COLOR,
+                    12,
+                    &format!("{}", squad.count()),
+                    glyph_cache,
+                    squad_transform,
+                    gl
+                );
             }
 
             text(
@@ -233,9 +236,10 @@ impl Client {
                     Command::Connect { sender } => {
                         self.sender = Some(sender);
                     }
-                    Command::Process { sender, planets, players, gold, me } => {
+                    Command::Process { sender, planets, players, squads, gold, me } => {
                         self.planets = planets;
                         self.players = players;
+                        self.squads = squads;
                         self.gold = gold;
                         self.me = me;
                     },
@@ -270,18 +274,14 @@ impl Client {
         let x = cursor[0] - width as f64 / 2.0;
         let y = -cursor[1] + height as f64 / 2.0;
 
-        self.current_selected_squad = None;
-
-        let players = &self.players;
-        for (_, player) in players {
-            for (_, squad) in player.squads() {
+        self.current_selected_squad = self.squads
+            .values()
+            .find(|squad| {
                 let Position(squad_x, squad_y) = squad.position();
                 let distance = ((squad_x - x).powi(2) + (squad_y - y).powi(2)).sqrt();
 
-                if distance < 10.0 {
-                    self.current_selected_squad = Some(squad.id());
-                }
-            }
-        }
+                distance < 10_f64
+            })
+            .map(|squad| squad.id());
     }
 }
