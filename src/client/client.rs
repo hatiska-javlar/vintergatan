@@ -136,6 +136,7 @@ impl Client {
         const SELECTION_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 0.2];
         const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
         const MY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.50588235, 0.35686275, 1.0];
+        const ENEMY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.22352941, 0.35686275, 1.0];
         const SQUAD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
         const HIGHLIGHT_COLOR:[f32; 4] = [1.0, 1.0, 1.0, 0.5];
 
@@ -163,12 +164,13 @@ impl Client {
                     .trans(center_x, center_y)
                     .trans(planet_x, -planet_y);
 
-                let is_my_planet = planet.owner().map_or(false, |owner| owner == me);
-                let planet_color = if is_my_planet {
-                    MY_PLANET_COLOR
-                } else {
-                    PLANET_COLOR
-                };
+                let planet_color = planet.owner().map_or(PLANET_COLOR, |owner| {
+                    if owner == me {
+                        MY_PLANET_COLOR
+                    } else {
+                        ENEMY_PLANET_COLOR
+                    }
+                });
 
                 ellipse(planet_color, planet_shape, planet_transform, gl);
 
@@ -198,12 +200,18 @@ impl Client {
                     }
                 }
 
+                let label_transform = if squad.owner() == me {
+                    squad_transform.trans(16.0, 12.0)
+                } else {
+                    squad_transform.trans(16.0, 0.0)
+                };
+
                 text(
                     TEXT_COLOR,
                     12,
                     &format!("{}", squad.count()),
                     glyph_cache,
-                    squad_transform,
+                    label_transform,
                     gl
                 );
             }

@@ -140,7 +140,7 @@ impl Server {
                 .filter(|planet| planet.owner().map_or(false, |owner| player.id() == owner))
                 .count();
 
-            let gold = player.gold() + 1.0 * planets_count as f64 * dt;
+            let gold = player.gold() + 1.0 * (planets_count as f64).sqrt() * dt;
             player.set_gold(gold);
         }
     }
