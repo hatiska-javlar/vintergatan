@@ -13,6 +13,7 @@ use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
+use client::json;
 use client::planet::Planet;
 use client::player::Player;
 use client::squad::Squad;
@@ -105,7 +106,8 @@ impl Client {
                         let y = -cursor_position[1] + height as f64 / 2.0;
 
                         if let Some(ref sender) = self.sender {
-                            sender.send(format!("{{\"move\":{},\"x\":{},\"y\":{}}}", squad_id, x, y));
+                            let command_json = json::format_squad_move_command(squad_id, x, y);
+                            sender.send(command_json);
                         }
                     }
                 }
@@ -113,12 +115,13 @@ impl Client {
                 Event::Input(Input::Press(Button::Keyboard(Key::B))) => {
                     if let Some(planet_id) = self.current_selected_planet {
                         if let Some(ref sender) = self.sender {
-                            sender.send(format!("{{\"spawn\":{}}}", planet_id));
+                            let command_json = json::format_squad_spawn_command(planet_id);
+                            sender.send(command_json);
                         }
                     }
                 }
 
-                _ => {}
+                _ => { }
             }
 
         }

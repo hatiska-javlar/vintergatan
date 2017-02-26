@@ -1,5 +1,6 @@
 mod client;
 mod command;
+mod json;
 mod planet;
 mod player;
 mod squad;

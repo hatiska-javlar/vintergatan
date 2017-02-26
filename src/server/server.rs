@@ -1,6 +1,5 @@
 use std::cmp::min;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::sync::mpsc::{
     channel,
     Receiver as ChannelReceiver
@@ -34,6 +33,7 @@ use ws::{
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
+use server::json;
 use server::player::Player;
 use server::planet::Planet;
 use server::squad::{Squad, SquadState};
@@ -82,7 +82,7 @@ impl Server {
             match command {
                 Command::Connect { sender } => self.add_player(sender),
 
-                Command::Move { sender, squad_id, x, y } => {
+                Command::SquadMove { sender, squad_id, x, y } => {
                     let player_id = sender.token().as_usize() as PlayerId;
 
                     let position = Self::find_planet_by_position(&self.planets, Position(x, y))
@@ -95,7 +95,7 @@ impl Server {
                     }
                 },
 
-                Command::Spawn { sender, planet_id } => {
+                Command::SquadSpawn { sender, planet_id } => {
                     let player_id = sender.token().as_usize() as PlayerId;
 
                     if let Some(planet) = self.planets.get(&planet_id) {
@@ -117,6 +117,7 @@ impl Server {
                         }
                     }
                 },
+
                 _ => { }
             }
         }
@@ -184,22 +185,19 @@ impl Server {
     }
 
     fn render(&mut self, args: &RenderArgs) {
-        let planets_json = self.format_planets_as_json();
-        let players_json = self.format_players_as_json();
-        let squads_json = self.format_squads_as_json();
+        let planets_json = json::format_planets(&self.planets);
+        let players_json = json::format_players(&self.players);
+        let squads_json = json::format_squads(&self.squads);
 
-        let players = self.players.values();
-        for player in players {
-            let message_json = format!(
-                "{{\"planets\":{},\"players\":{},\"squads\":{},\"id\":{},\"gold\":{}}}",
-                planets_json,
-                players_json,
-                squads_json,
-                player.id(),
-                player.gold()
+        for player in self.players.values() {
+            let process_command_json = json::format_process_command(
+                player,
+                &planets_json,
+                &players_json,
+                &squads_json
             );
 
-            player.send(message_json);
+            player.send(process_command_json);
         }
     }
 
@@ -266,59 +264,5 @@ impl Server {
                 let Position(planet_x, planet_y) = planet.position();
                 ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt() < 10_f64
             })
-    }
-
-    fn format_planets_as_json(&self) -> String {
-        let formatted_planets = self.planets
-            .values()
-            .map(|planet| {
-                let id = planet.id();
-                let Position(x, y) = planet.position();
-                let owner = Self::format_option_as_json(planet.owner());
-
-                format!("{{\"id\":{},\"x\":{},\"y\":{},\"owner\":{}}}", id, x, y, owner)
-            })
-            .collect::<Vec<String>>();
-
-        format!("[{}]", Self::join(formatted_planets, ","))
-    }
-
-    fn format_players_as_json(&self) -> String {
-        let formatted_players = self.players
-            .values()
-            .map(|player| format!("{{\"id\":{}}}", player.id()))
-            .collect::<Vec<String>>();
-
-        format!("[{}]", Self::join(formatted_players, ","))
-    }
-
-    fn format_squads_as_json(&self) -> String {
-        let formatted_squads = self.squads
-            .values()
-            .map(|squad| {
-                let id = squad.id();
-                let owner = squad.owner();
-                let Position(x, y) = squad.position();
-                let count = squad.count();
-
-                format!("{{\"id\":{},\"owner\":{},\"x\":{},\"y\":{},\"count\":{}}}", id, owner, x, y, count)
-            })
-            .collect::<Vec<String>>();
-
-        format!("[{}]", Self::join(formatted_squads, ","))
-    }
-
-    fn format_option_as_json<T: Display>(option: Option<T>) -> String {
-        if let Some(value) = option {
-            format!("{}", value)
-        } else {
-            "null".to_string()
-        }
-    }
-
-    fn join<S: ToString>(vec: Vec<S>, sep: &str) -> String {
-        vec
-            .iter()
-            .fold("".to_string(), |a, b| if a.len() > 0 { a + sep } else { a } + &b.to_string())
     }
 }
