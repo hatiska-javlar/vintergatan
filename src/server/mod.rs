@@ -7,7 +7,7 @@ mod squad;
 
 use server::server::Server;
 
-pub fn run() {
+pub fn run(address: String) {
     let mut server = Server::new();
-    server.run();
+    server.run(address);
 }

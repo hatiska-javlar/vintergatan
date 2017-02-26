@@ -7,7 +7,7 @@ mod squad;
 
 use client::client::Client;
 
-pub fn run() {
+pub fn run(address: String) {
     let mut client = Client::new();
-    client.run();
+    client.run(address);
 }

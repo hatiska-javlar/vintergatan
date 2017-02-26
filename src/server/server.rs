@@ -53,9 +53,9 @@ impl Server {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, address: String) {
         let (tx, rx) = channel::<Command>();
-        thread::spawn(move || listen("127.0.0.1:3012", |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
+        thread::spawn(move || listen(&address[..], |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
         let window_settings = WindowSettings::new("Vintergatan game server", [1, 1]);
         let mut no_window = NoWindow::new(&window_settings);

@@ -69,11 +69,11 @@ impl Client {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, address: String) {
         let (tx, rx) = channel::<Command>();
 
         self.rx = Some(rx);
-        thread::spawn(move || connect("ws://127.0.0.1:3012", |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
+        thread::spawn(move || connect(format!("ws://{}", address), |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
         let mut events = self.window.events();
         while let Some(e) = events.next(&mut self.window) {

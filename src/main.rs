@@ -18,12 +18,10 @@ mod client;
 mod server;
 
 fn run_server(server_address: Option<String>) -> Option<JoinHandle<()>> {
-    if server_address.is_some() {
-        println!("Starting server on {}", server_address.unwrap_or("127.0.0.1:9999".to_string()));
-        return Some(thread::spawn(|| server::run()));
-    }
-
-    return None;
+    server_address.map(|address| {
+        println!("Starting server on {}", address);
+        thread::spawn(|| server::run(address))
+    })
 }
 
 fn main() {
@@ -50,12 +48,14 @@ fn main() {
     let server_thread = run_server(server_address);
 
     let client_address = matches.opt_str("c");
-    if client_address.is_some() {
-        thread::sleep(Duration::from_secs(1));
-        client::run();
-    }
+    match client_address {
+        Some(address) => {
+            thread::sleep(Duration::from_secs(1));
+            client::run(address);
+        },
 
-    if client_address.is_none() && server_thread.is_some() {
-        server_thread.unwrap().join().unwrap();
+        None => {
+            server_thread.map(|thread| thread.join());
+        }
     }
 }
