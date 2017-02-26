@@ -88,7 +88,7 @@ pub fn format_squads(squads: &HashMap<Id, Squad>) -> String {
                 squad.owner(),
                 x,
                 y,
-                squad.count()
+                squad.life().ceil()
             )
         })
         .collect::<Vec<String>>();

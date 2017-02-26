@@ -5,12 +5,12 @@ pub struct Squad {
     owner: PlayerId,
     state: SquadState,
     position: Position,
-    count: u64
+    life: f64
 }
 
 #[derive(Copy, Clone)]
 pub enum SquadState {
-    Pending,
+    InSpace,
     Moving {
         destination: Position
     },
@@ -24,9 +24,9 @@ impl Squad {
         Squad {
             id: id,
             owner: owner,
-            state: SquadState::Pending,
+            state: SquadState::InSpace,
             position: position,
-            count: 10
+            life: 10_f64
         }
     }
 
@@ -54,12 +54,12 @@ impl Squad {
         self.position = position;
     }
 
-    pub fn count(&self) -> u64 {
-        self.count
+    pub fn life(&self) -> f64 {
+        self.life
     }
 
-    pub fn set_count(&mut self, count: u64) {
-        self.count = count;
+    pub fn set_life(&mut self, life: f64) {
+        self.life = life;
     }
 
     pub fn move_to(&mut self, position: Position) {

@@ -136,7 +136,7 @@ impl Server {
 
         for squad in self.squads.values_mut() {
             match squad.state() {
-                SquadState::Pending => {},
+                SquadState::InSpace => { },
 
                 SquadState::Moving { destination } => {
                     let Position(x, y) = squad.position();
@@ -151,7 +151,7 @@ impl Server {
                         squad.set_position(destination);
 
                         let state = Self::find_planet_by_position(&self.planets, destination)
-                            .map_or(SquadState::Pending, |planet| SquadState::OnOrbit { planet_id: planet.id() });
+                            .map_or(SquadState::InSpace, |planet| SquadState::OnOrbit { planet_id: planet.id() });
 
                         squad.set_state(state);
                     } else {
@@ -165,9 +165,11 @@ impl Server {
                     }
                 },
 
-                SquadState::OnOrbit { .. } => {}
+                SquadState::OnOrbit { .. } => { }
             }
         }
+
+        self.update_squads_fight(args.dt);
 
         for planet in self.planets.values_mut() {
             let squads_on_orbit = self.squads
@@ -253,6 +255,58 @@ impl Server {
         if let Some(planet) = planet {
             planet.set_owner(Some(player_id));
         }
+    }
+
+    fn update_squads_fight(&mut self, dt: f64) {
+        let hits = self.get_squads_hits();
+
+        for (squad_id, hit) in hits {
+            let squad_life = self.squads.get(&squad_id)
+                .map(|squad| squad.life());
+
+            if let Some(mut squad_life) = squad_life {
+                squad_life -= hit * dt;
+                if squad_life < 0_f64 {
+                    self.squads.remove(&squad_id);
+                } else {
+                    self.squads.get_mut(&squad_id)
+                        .map(|squad| squad.set_life(squad_life));
+                }
+            }
+        }
+    }
+
+    fn get_squads_hits(&self) -> HashMap<Id, f64> {
+        let mut hits: HashMap<Id, f64> = HashMap::new();
+
+        let combat_squads = self.squads
+            .values()
+            .filter(|squad| {
+                match squad.state() {
+                    SquadState::InSpace | SquadState::OnOrbit { .. } => true,
+                    SquadState::Moving { .. } => false
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for combat_squad in &combat_squads {
+            let attacked_squads = combat_squads
+                .iter()
+                .filter(|attacked_squad| {
+                    attacked_squad.owner() != combat_squad.owner() &&
+                        attacked_squad.id() != combat_squad.id() &&
+                        attacked_squad.position().distance_to(combat_squad.position()) < 10_f64
+                })
+                .collect::<Vec<_>>();
+
+            let attack = 1_f64 / attacked_squads.len() as f64;
+            for attacked_squad in attacked_squads {
+                let hit = hits.get(&attacked_squad.id()).unwrap_or(&0_f64) + attack;
+                hits.insert(attacked_squad.id(), hit);
+            }
+        }
+
+        hits
     }
 
     fn find_planet_by_position(planets: &HashMap<Id, Planet>, position: Position) -> Option<&Planet> {

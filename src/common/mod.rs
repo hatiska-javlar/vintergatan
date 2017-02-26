@@ -12,6 +12,12 @@ pub type PlayerId = usize;
 #[derive(Copy, Clone)]
 pub struct Position(pub f64, pub f64);
 
+impl Position {
+    pub fn distance_to(&self, position: Position) -> f64 {
+        ((self.0 - position.0).powi(2) + (self.1 - position.1).powi(2)).sqrt()
+    }
+}
+
 #[derive(Debug)]
 pub enum ParseCommandError {
     ParserError(ParserError),
