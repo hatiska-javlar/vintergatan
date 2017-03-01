@@ -137,7 +137,9 @@ impl Server {
                                 let squad_id = random::<Id>();
                                 let position = planet.position();
 
-                                let squad = Squad::new(squad_id, player_id, position);
+                                let mut squad = Squad::new(squad_id, player_id, position);
+                                squad.set_state(SquadState::OnOrbit { planet_id: planet.id() });
+
                                 self.squads.insert(squad_id, squad);
 
                                 player.set_gold(gold - 10.0);
@@ -321,7 +323,7 @@ impl Server {
                 })
                 .collect::<Vec<_>>();
 
-            let attack = 1_f64 / attacked_squads.len() as f64;
+            let attack = 1_f64 * combat_squad.life().ceil() / attacked_squads.len() as f64;
             for attacked_squad in attacked_squads {
                 let hit = hits.get(&attacked_squad.id()).unwrap_or(&0_f64) + attack;
                 hits.insert(attacked_squad.id(), hit);
