@@ -72,4 +72,11 @@ impl Squad {
             _ => false
         }
     }
+
+    pub fn is_standing(&self) -> bool {
+        match self.state {
+            SquadState::InSpace | SquadState::OnOrbit { .. } => true,
+            SquadState::Moving { .. } => false
+        }
+    }
 }

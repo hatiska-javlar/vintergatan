@@ -18,7 +18,8 @@ pub enum Command {
         sender: Sender,
         squad_id: Id,
         x: f64,
-        y: f64
+        y: f64,
+        cut_count: Option<u64>
     },
 
     Disconnect {
@@ -48,13 +49,14 @@ impl ToCommand for Command {
             },
 
             "squad_move" => {
-                let (squad_id, x, y) = json::parse_squad_move_command_data(&data)?;
+                let (squad_id, x, y, cut_count) = json::parse_squad_move_command_data(&data)?;
 
                 Command::SquadMove {
                     sender: sender,
                     squad_id: squad_id,
                     x: x,
-                    y: y
+                    y: y,
+                    cut_count: cut_count
                 }
             },
 

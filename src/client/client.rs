@@ -35,6 +35,8 @@ pub struct Client {
 
     current_selected_planet: Option<Id>,
     current_selected_squad: Option<Id>,
+    is_control_key: bool,
+    is_shift_key: bool,
     sender: Option<Sender>
 }
 
@@ -65,6 +67,8 @@ impl Client {
 
             current_selected_planet: None,
             current_selected_squad: None,
+            is_control_key: false,
+            is_shift_key: false,
             sender: None
         }
     }
@@ -106,7 +110,8 @@ impl Client {
                         let y = -cursor_position[1] + height as f64 / 2.0;
 
                         if let Some(ref sender) = self.sender {
-                            let command_json = json::format_squad_move_command(squad_id, x, y);
+                            let cut_count = self.get_cut_count();
+                            let command_json = json::format_squad_move_command(squad_id, x, y, cut_count);
                             sender.send(command_json);
                         }
                     }
@@ -119,6 +124,22 @@ impl Client {
                             sender.send(command_json);
                         }
                     }
+                }
+
+                Event::Input(Input::Press(Button::Keyboard(Key::LCtrl))) => {
+                    self.is_control_key = true;
+                }
+
+                Event::Input(Input::Release(Button::Keyboard(Key::LCtrl))) => {
+                    self.is_control_key = false;
+                }
+
+                Event::Input(Input::Press(Button::Keyboard(Key::LShift))) => {
+                    self.is_shift_key = true;
+                }
+
+                Event::Input(Input::Release(Button::Keyboard(Key::LShift))) => {
+                    self.is_shift_key = false;
                 }
 
                 _ => { }
@@ -291,5 +312,21 @@ impl Client {
                 distance < 10_f64
             })
             .map(|squad| squad.id());
+    }
+
+    fn get_cut_count(&self) -> Option<u64> {
+        if self.is_control_key && self.is_shift_key {
+            return Some(1);
+        }
+
+        if self.is_control_key {
+            return Some(10);
+        }
+
+        if self.is_shift_key {
+            return Some(50);
+        }
+
+        None
     }
 }

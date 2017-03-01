@@ -44,8 +44,7 @@ pub fn parse_player_id_from_json_object(object: &Object, property: &str) -> Resu
 }
 
 pub fn parse_option_player_id_from_json_object(object: &Object, property: &str) -> Result<Option<PlayerId>> {
-    let option_player_id = parse_value_from_json_object(object, property)?
-        .as_u64()
+    let option_player_id = parse_option_u64_from_json_object(object, property)?
         .map(|player_id| player_id as PlayerId);
 
     Ok(option_player_id)
@@ -57,9 +56,15 @@ pub fn parse_id_from_json_object(object: &Object, property: &str) -> Result<Id> 
 }
 
 pub fn parse_u64_from_json_object(object: &Object, property: &str) -> Result<u64> {
-    parse_value_from_json_object(object, property)?
-        .as_u64()
+    parse_option_u64_from_json_object(object, property)?
         .ok_or(incompatible_type_error(property))
+}
+
+pub fn parse_option_u64_from_json_object(object: &Object, property: &str) -> Result<Option<u64>> {
+    let option_value = parse_value_from_json_object(object, property)?
+        .as_u64();
+
+    Ok(option_value)
 }
 
 pub fn parse_f64_from_json_object(object: &Object, property: &str) -> Result<f64> {

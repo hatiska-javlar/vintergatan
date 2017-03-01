@@ -82,15 +82,43 @@ impl Server {
             match command {
                 Command::Connect { sender } => self.add_player(sender),
 
-                Command::SquadMove { sender, squad_id, x, y } => {
+                Command::SquadMove { sender, squad_id, x, y, cut_count } => {
                     let player_id = sender.token().as_usize() as PlayerId;
 
                     let position = Self::find_planet_by_position(&self.planets, Position(x, y))
                         .map_or(Position(x, y), |planet| planet.position());
 
-                    if let Some(mut squad) = self.squads.get_mut(&squad_id) {
-                        if squad.owner() == player_id {
-                            squad.move_to(position);
+                    match cut_count {
+                        Some(count) => {
+                            let squad_data = self.squads
+                                .get(&squad_id)
+                                .map(|squad| (squad.owner(), squad.life(), squad.position()));
+
+                            if let Some((squad_owner_id, squad_life, squad_position)) = squad_data {
+                                let is_owner = squad_owner_id == player_id;
+                                let is_can_cut = squad_life > count as f64;
+
+                                if is_owner && is_can_cut {
+                                    self.squads.get_mut(&squad_id).map(|squad| {
+                                        let life = squad.life();
+                                        squad.set_life(life - count as f64);
+                                    });
+
+                                    let mut squad = Squad::new(random::<Id>(), player_id, squad_position);
+                                    squad.set_life(count as f64);
+                                    squad.move_to(position);
+
+                                    self.squads.insert(squad.id(), squad);
+                                }
+                            }
+                        },
+
+                        None => {
+                            self.squads.get_mut(&squad_id).map(|squad| {
+                                if squad.owner() == player_id {
+                                    squad.move_to(position);
+                                }
+                            });
                         }
                     }
                 },
@@ -130,6 +158,7 @@ impl Server {
         self.update_squads(dt);
         self.update_planets();
 
+        self.merge_squads();
         self.update_fight(dt);
     }
 
@@ -198,6 +227,63 @@ impl Server {
         }
     }
 
+    fn merge_squads(&mut self) {
+        let merged_squads = self.get_merged_squads();
+
+        for (squad_id, squad_life) in merged_squads {
+            match squad_life {
+                Some(life) => {
+                    self.squads.get_mut(&squad_id)
+                        .map(|squad| squad.set_life(life));
+                },
+
+                None => {
+                    self.squads.remove(&squad_id);
+                }
+            }
+        }
+    }
+
+    fn get_merged_squads(&mut self) -> HashMap<Id, Option<f64>> {
+        let mut merged_squads = HashMap::new();
+
+        let squads = self.squads
+            .values()
+            .filter(|squad| squad.is_standing())
+            .collect::<Vec<_>>();
+
+        for squad in &squads {
+            if merged_squads.contains_key(&squad.id()) {
+                continue;
+            }
+
+            let other_squads = squads
+                .iter()
+                .filter(|other_squad| {
+                    other_squad.id() != squad.id() &&
+                        other_squad.owner() == squad.owner() &&
+                        other_squad.position().distance_to(squad.position()) < 5_f64
+                })
+                .collect::<Vec<_>>();
+
+            if other_squads.is_empty() {
+                continue;
+            }
+
+            let other_squads_life = other_squads
+                .iter()
+                .fold(0_f64, |life, squad| life + squad.life());
+
+            merged_squads.insert(squad.id(), Some(squad.life() + other_squads_life));
+
+            for other_squad in other_squads {
+                merged_squads.insert(other_squad.id(), None);
+            }
+        }
+
+        merged_squads
+    }
+
     fn update_fight(&mut self, dt: f64) {
         let hits = self.get_squads_hits();
 
@@ -222,12 +308,7 @@ impl Server {
 
         let combat_squads = self.squads
             .values()
-            .filter(|squad| {
-                match squad.state() {
-                    SquadState::InSpace | SquadState::OnOrbit { .. } => true,
-                    SquadState::Moving { .. } => false
-                }
-            })
+            .filter(|squad| squad.is_standing())
             .collect::<Vec<_>>();
 
         for combat_squad in &combat_squads {

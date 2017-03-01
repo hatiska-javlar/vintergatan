@@ -39,12 +39,13 @@ pub fn format_squad_spawn_command(planet_id: Id) -> String {
     )
 }
 
-pub fn format_squad_move_command(squad_id: Id, x: f64, y: f64) -> String {
+pub fn format_squad_move_command(squad_id: Id, x: f64, y: f64, cut_count: Option<u64>) -> String {
     format!(
-        r#"{{"action":"squad_move","data":{{"squad_id":{},"x":{},"y":{}}}}}"#,
+        r#"{{"action":"squad_move","data":{{"squad_id":{},"x":{},"y":{},"cut_count":{}}}}}"#,
         squad_id,
         x,
-        y
+        y,
+        cut_count.map_or("null".to_string(), |count| count.to_string())
     )
 }
 
