@@ -153,13 +153,14 @@ impl Client {
 
         const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
         const GOLD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
-        const TEXT_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 1.0];
-        const SELECTION_COLOR:[f32; 4] = [0.878431373, 0.223529412, 0.356862745, 0.2];
+        const SELECTION_COLOR:[f32; 4] = [0.0, 1.0, 0.0, 0.2];
         const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
         const MY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.50588235, 0.35686275, 1.0];
-        const ENEMY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.22352941, 0.35686275, 1.0];
-        const SQUAD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
-        const HIGHLIGHT_COLOR:[f32; 4] = [1.0, 1.0, 1.0, 0.5];
+        const ENEMY_PLANET_COLOR: [f32; 4] = [0.34901961, 0.08627451, 0.14117647, 1.0];
+        const MY_SQUAD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
+        const ENEMY_SQUAD_COLOR: [f32; 4] = [0.87843137, 0.22352941, 0.35686275, 1.0];
+        const MY_TEXT_COLOR: [f32; 4] = [0.0, 1.0, 0.0, 0.2];
+        const ENEMY_TEXT_COLOR: [f32; 4] = [0.87843137, 0.22352941, 0.35686275, 1.0];
 
         let planet_shape = ellipse::circle(0.0, 0.0, 10.0);
         let squad_shape = ellipse::circle(0.0, 0.0, 5.0);
@@ -197,9 +198,8 @@ impl Client {
 
                 if let Some(current_selected_planet) = current_selected_planet {
                     if planet.id() == current_selected_planet {
-                        ellipse(HIGHLIGHT_COLOR, planet_shape, planet_transform, gl);
-                        Rectangle::new_border(SELECTION_COLOR, 1.0)
-                            .draw([-15.0, -15.0, 30.0, 30.0], &c.draw_state, planet_transform, gl);
+                        Ellipse::new_border(SELECTION_COLOR, 1.0)
+                            .draw([-18.0, -18.0, 36.0, 36.0], &c.draw_state, planet_transform, gl);
                     }
                 }
             }
@@ -211,24 +211,25 @@ impl Client {
                     .trans(center_x, center_y)
                     .trans(squad_x, -squad_y);
 
-                ellipse(SQUAD_COLOR, squad_shape, squad_transform, gl);
+                let squad_color = if squad.owner() == me { MY_SQUAD_COLOR } else { ENEMY_SQUAD_COLOR };
+                ellipse(squad_color, squad_shape, squad_transform, gl);
 
                 if let Some(current_selected_squad) = current_selected_squad {
                     if squad.id() == current_selected_squad {
-                        ellipse(HIGHLIGHT_COLOR, squad_shape, squad_transform, gl);
-                        Rectangle::new_border(SELECTION_COLOR, 1.0)
-                            .draw([-10.0, -10.0, 20.0, 20.0], &c.draw_state, squad_transform, gl);
+                        Ellipse::new_border(SELECTION_COLOR, 1.0)
+                            .draw([-12.0, -12.0, 24.0, 24.0], &c.draw_state, squad_transform, gl);
                     }
                 }
 
                 let label_transform = if squad.owner() == me {
-                    squad_transform.trans(16.0, 12.0)
+                    squad_transform.trans(16.0, 24.0)
                 } else {
-                    squad_transform.trans(16.0, 0.0)
+                    squad_transform.trans(16.0, -12.0)
                 };
 
+                let text_color = if squad.owner() == me { MY_TEXT_COLOR } else { ENEMY_TEXT_COLOR };
                 text(
-                    TEXT_COLOR,
+                    text_color,
                     12,
                     &format!("{}", squad.count()),
                     glyph_cache,
