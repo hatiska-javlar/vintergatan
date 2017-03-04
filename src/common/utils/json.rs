@@ -4,12 +4,6 @@ use common::{Id, ParseCommandError, ParseCommandResult, PlayerId};
 
 type Result<T> = ParseCommandResult<T>;
 
-pub fn join<S: ToString>(vec: Vec<S>, sep: &str) -> String {
-    vec
-        .iter()
-        .fold("".to_string(), |a, b| if a.len() > 0 { a + sep } else { a } + &b.to_string())
-}
-
 pub fn parse_json(string: &str) -> Result<Json> {
     Json::from_str(string)
         .map_err(ParseCommandError::ParserError)

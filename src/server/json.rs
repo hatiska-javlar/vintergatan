@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rustc_serialize::json::{Json, Object};
 
 use common::{Id, PlayerId, ParseCommandResult, Position, utils};
+use common::utils::json;
 use server::planet::Planet;
 use server::player::Player;
 use server::squad::Squad;
@@ -10,24 +11,24 @@ use server::squad::Squad;
 type Result<T> = ParseCommandResult<T>;
 
 pub fn parse_command(string: &str) -> Result<(String, Object)> {
-    let json = utils::parse_json(string)?;
-    let params = utils::parse_json_as_object(&json)?;
+    let json = json::parse_json(string)?;
+    let params = json::parse_json_as_object(&json)?;
 
-    let command = utils::parse_string_from_json_object(params, "action")?;
-    let data = utils::parse_object_from_json_object(params, "data")?;
+    let command = json::parse_string_from_json_object(params, "action")?;
+    let data = json::parse_object_from_json_object(params, "data")?;
 
     return Ok((command.to_string(), data.to_owned()));
 }
 
 pub fn parse_squad_spawn_command_data(data: &Object) -> Result<Id> {
-    utils::parse_id_from_json_object(data, "planet_id")
+    json::parse_id_from_json_object(data, "planet_id")
 }
 
 pub fn parse_squad_move_command_data(data: &Object) -> Result<(Id, f64, f64, Option<u64>)> {
-    let squad_id = utils::parse_id_from_json_object(data, "squad_id")?;
-    let x = utils::parse_f64_from_json_object(data, "x")?;
-    let y = utils::parse_f64_from_json_object(data, "y")?;
-    let cut_count = utils::parse_option_u64_from_json_object(data, "cut_count")?;
+    let squad_id = json::parse_id_from_json_object(data, "squad_id")?;
+    let x = json::parse_f64_from_json_object(data, "x")?;
+    let y = json::parse_f64_from_json_object(data, "y")?;
+    let cut_count = json::parse_option_u64_from_json_object(data, "cut_count")?;
 
     return Ok((squad_id, x, y, cut_count));
 }
