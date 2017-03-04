@@ -1,12 +1,13 @@
 mod client;
 mod command;
+mod json;
 mod planet;
 mod player;
 mod squad;
 
 use client::client::Client;
 
-pub fn run() {
+pub fn run(address: String) {
     let mut client = Client::new();
-    client.run();
+    client.run(address);
 }

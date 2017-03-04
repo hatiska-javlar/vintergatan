@@ -1,16 +1,16 @@
-use common::id::Id;
-use common::position::Position;
+use common::{Id, PlayerId, Position};
 
 pub struct Squad {
     id: Id,
+    owner: PlayerId,
     state: SquadState,
     position: Position,
-    count: u64
+    life: f64
 }
 
 #[derive(Copy, Clone)]
 pub enum SquadState {
-    Pending,
+    InSpace,
     Moving {
         destination: Position
     },
@@ -20,17 +20,22 @@ pub enum SquadState {
 }
 
 impl Squad {
-    pub fn new(id: Id, position: Position) -> Squad {
+    pub fn new(id: Id, owner: PlayerId, position: Position) -> Squad {
         Squad {
             id: id,
-            state: SquadState::Pending,
+            owner: owner,
+            state: SquadState::InSpace,
             position: position,
-            count: 10
+            life: 10_f64
         }
     }
 
     pub fn id(&self) -> Id {
         self.id
+    }
+
+    pub fn owner(&self) -> PlayerId {
+        self.owner
     }
 
     pub fn state(&self) -> SquadState {
@@ -49,15 +54,29 @@ impl Squad {
         self.position = position;
     }
 
-    pub fn count(&self) -> u64 {
-        self.count
+    pub fn life(&self) -> f64 {
+        self.life
     }
 
-    pub fn set_count(&mut self, count: u64) {
-        self.count = count;
+    pub fn set_life(&mut self, life: f64) {
+        self.life = life;
     }
 
     pub fn move_to(&mut self, position: Position) {
         self.state = SquadState::Moving { destination: position };
+    }
+
+    pub fn is_on_orbit(&self, orbit_planet_id: Id) -> bool {
+        match self.state {
+            SquadState::OnOrbit { planet_id } => planet_id == orbit_planet_id,
+            _ => false
+        }
+    }
+
+    pub fn is_standing(&self) -> bool {
+        match self.state {
+            SquadState::InSpace | SquadState::OnOrbit { .. } => true,
+            SquadState::Moving { .. } => false
+        }
     }
 }

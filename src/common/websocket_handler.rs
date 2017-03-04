@@ -30,8 +30,15 @@ impl<C: ToCommand> Handler for WebsocketHandler<C> {
     }
 
     fn on_message(&mut self, message: Message) -> Result<()> {
-        if let Ok(command) = C::process(self.sender.clone(), message) {
-            self.tx.send(command);
+        match C::process(self.sender.clone(), &message) {
+            Ok(command) => {
+                self.tx.send(command);
+            },
+
+            Err(err) => {
+                println!("Error on processing command: {:?}", err);
+                println!("Message: {}", message);
+            }
         }
 
         Ok(())

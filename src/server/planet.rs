@@ -1,6 +1,4 @@
-use common::id::Id;
-use common::position::Position;
-use server::player::PlayerId;
+use common::{Id, PlayerId, Position};
 
 pub struct Planet {
     id: Id,

@@ -1,31 +1,25 @@
-use rustc_serialize::json::{Json, Object};
-use ws::{
-    Message,
-    Sender
-};
+use ws::{Message, Sender};
 
 use common::to_command::ToCommand;
-use common::id::Id;
+use common::{Id, ParseCommandError, ParseCommandResult};
+use server::json;
 
 pub enum Command {
     Connect {
         sender: Sender
     },
 
-    Process {
-        sender: Sender
-    },
-
-    Spawn {
+    SquadSpawn {
         sender: Sender,
         planet_id: Id
     },
 
-    Move {
+    SquadMove {
         sender: Sender,
         squad_id: Id,
         x: f64,
-        y: f64
+        y: f64,
+        cut_count: Option<u64>
     },
 
     Disconnect {
@@ -38,27 +32,38 @@ impl ToCommand for Command {
         Command::Connect { sender: sender }
     }
 
-    fn process(sender: Sender, message: Message) -> Result<Self, ()> {
-        let raw = message.into_text().unwrap_or("".to_string());
-        let parsed = Json::from_str(&raw).unwrap_or(Json::Object(Object::new()));
+    fn process(sender: Sender, message: &Message) -> ParseCommandResult<Self> {
+        let raw = message.as_text()
+            .map_err(ParseCommandError::BrokenCommand)?;
 
-        let empty_json_object = Object::new();
-        let params = parsed.as_object().unwrap_or(&empty_json_object);
+        let (action, data) = json::parse_command(raw)?;
 
-        if let Some(planet_id) = params.get("spawn") {
-            return Ok(Command::Spawn { sender: sender, planet_id: planet_id.as_u64().unwrap() });
-        }
+        let command = match action.as_ref() {
+            "squad_spawn" => {
+                let planet_id = json::parse_squad_spawn_command_data(&data)?;
 
-        if let Some(squad_id) = params.get("move") {
-            return Ok(Command::Move {
-                sender: sender,
-                squad_id: squad_id.as_u64().unwrap(),
-                x: params.get("x").unwrap().as_f64().unwrap(),
-                y: params.get("y").unwrap().as_f64().unwrap()
-            });
-        }
+                Command::SquadSpawn {
+                    sender: sender,
+                    planet_id: planet_id
+                }
+            },
 
-        Ok(Command::Process { sender: sender })
+            "squad_move" => {
+                let (squad_id, x, y, cut_count) = json::parse_squad_move_command_data(&data)?;
+
+                Command::SquadMove {
+                    sender: sender,
+                    squad_id: squad_id,
+                    x: x,
+                    y: y,
+                    cut_count: cut_count
+                }
+            },
+
+            _ => return Err(ParseCommandError::UnsupportedAction)
+        };
+
+        Ok(command)
     }
 
     fn disconnect(sender: Sender) -> Self {
