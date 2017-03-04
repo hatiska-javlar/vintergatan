@@ -171,7 +171,7 @@ impl Server {
                 .filter(|planet| planet.owner().map_or(false, |owner| player.id() == owner))
                 .count();
 
-            let gold = player.gold() + 1.0 * (planets_count as f64).sqrt() * dt;
+            let gold = player.gold() + 1_f64 * (planets_count as f64).powf(1_f64 / 3_f64) * dt;
             player.set_gold(gold);
         }
     }
@@ -294,7 +294,7 @@ impl Server {
                 .map(|squad| squad.life());
 
             if let Some(mut squad_life) = squad_life {
-                squad_life -= hit * dt;
+                squad_life -= hit.min(squad_life.ceil()) * dt;
                 if squad_life < 0_f64 {
                     self.squads.remove(&squad_id);
                 } else {
