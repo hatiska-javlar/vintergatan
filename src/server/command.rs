@@ -9,6 +9,10 @@ pub enum Command {
         sender: Sender
     },
 
+    Ready {
+        sender: Sender
+    },
+
     SquadSpawn {
         sender: Sender,
         planet_id: Id
@@ -39,6 +43,10 @@ impl ToCommand for Command {
         let (action, data) = json::parse_command(raw)?;
 
         let command = match action.as_ref() {
+            "ready" => {
+                Command::Ready { sender: sender }
+            },
+
             "squad_spawn" => {
                 let planet_id = json::parse_squad_spawn_command_data(&data)?;
 

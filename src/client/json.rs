@@ -33,6 +33,10 @@ pub fn parse_process_command(string: &str) -> Result<ProcessCommandTuple> {
     return Ok(process_command_tuple);
 }
 
+pub fn format_ready_command() -> String {
+    format!(r#"{{"action":"ready","data":{{}}}}"#)
+}
+
 pub fn format_squad_spawn_command(planet_id: Id) -> String {
     format!(
         r#"{{"action":"squad_spawn","data":{{"planet_id":{}}}}}"#,
@@ -78,8 +82,10 @@ fn parse_players(params: &Object) -> Result<HashMap<PlayerId, Player>> {
         let player_json_object = json::parse_json_as_object(player_json)?;
 
         let player_id = json::parse_player_id_from_json_object(player_json_object, "id")?;
+        let player_name = json::parse_string_from_json_object(player_json_object, "name")?;
+        let player_state = json::parse_string_from_json_object(player_json_object, "state")?;
 
-        let player = Player::new(player_id);
+        let player = Player::new(player_id, player_name.to_string(), player_state.to_string());
         players.insert(player_id, player);
     }
 
