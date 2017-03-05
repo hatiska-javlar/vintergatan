@@ -266,9 +266,11 @@ impl Client {
                 gl
             );
 
-            let players_state = players.values()
+            let mut players_state = players.values()
                 .map(|player| format!("{}: {}", player.name(), player.state()))
                 .collect::<Vec<_>>();
+
+            players_state.sort();
 
             text(
                 GOLD_COLOR,
