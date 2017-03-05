@@ -1,2 +1,2 @@
 # Vintergatan
-![vintergatan](https://bitbucket.org/hatiska-javlar/vintergatan/raw/master/wireframe.svg)
+![vintergatan](https://gitlab.com/hatiska-javlar/vintergatan/raw/master/wireframe.svg)
