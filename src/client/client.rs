@@ -19,6 +19,7 @@ use client::player::Player;
 use client::squad::Squad;
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
+use common::utils;
 
 pub struct Client {
     window: GlutinWindow,
@@ -94,6 +95,14 @@ impl Client {
             }
 
             match e {
+                Event::Input(Input::Press(Button::Keyboard(Key::Space))) => {
+                    let command_json = json::format_ready_command();
+
+                    if let Some(ref sender) = self.sender {
+                        sender.send(command_json);
+                    }
+                }
+
                 Event::Input(Input::Press(Button::Mouse(MouseButton::Left))) => {
                     let cursor_position = self.cursor_position;
                     self.select_planet(cursor_position);
@@ -256,6 +265,19 @@ impl Client {
                 c.transform.trans(100.0, 17.0),
                 gl
             );
+
+            let players_state = players.values()
+                .map(|player| format!("{}: {}", player.name(), player.state()))
+                .collect::<Vec<_>>();
+
+            text(
+                GOLD_COLOR,
+                14,
+                &utils::join(players_state, ", "),
+                glyph_cache,
+                c.transform.trans(200.0, 17.0),
+                gl
+            )
         });
     }
 

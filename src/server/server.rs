@@ -38,7 +38,14 @@ use server::player::Player;
 use server::planet::Planet;
 use server::squad::{Squad, SquadState};
 
+enum ServerState {
+    Waiting,
+    Playing,
+    Finished
+}
+
 pub struct Server {
+    state: ServerState,
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
     squads: HashMap<Id, Squad>
@@ -47,6 +54,7 @@ pub struct Server {
 impl Server {
     pub fn new() -> Self {
         Server {
+            state: ServerState::Waiting,
             planets: Self::generate_planets(),
             players: HashMap::new(),
             squads: HashMap::new()
@@ -81,6 +89,12 @@ impl Server {
         while let Ok(command) = rx.try_recv() {
             match command {
                 Command::Connect { sender } => self.add_player(sender),
+
+                Command::Ready { sender } => {
+                    let player_id = sender.token().as_usize() as PlayerId;
+                    self.players.get_mut(&player_id)
+                        .map(|player| player.set_ready_state());
+                },
 
                 Command::SquadMove { sender, squad_id, x, y, cut_count } => {
                     let player_id = sender.token().as_usize() as PlayerId;
@@ -154,6 +168,12 @@ impl Server {
     }
 
     fn update(&mut self, args: &UpdateArgs) {
+        self.update_server_state();
+
+        if !self.is_playing() {
+            return;
+        }
+
         let dt = args.dt;
 
         self.update_players(dt);
@@ -164,12 +184,61 @@ impl Server {
         self.update_fight(dt);
     }
 
+    fn update_server_state(&mut self) {
+        if self.players.len() == 0 {
+            return;
+        }
+
+        match self.state {
+            ServerState::Waiting => {
+                let is_all_ready = self.players
+                    .values()
+                    .all(|player| player.is_ready());
+
+                if is_all_ready {
+                    self.state = ServerState::Playing;
+
+                    for player in self.players.values_mut() {
+                        player.set_playing_state();
+                    }
+                }
+            },
+
+            ServerState::Playing => {
+                let has_winner = self.players
+                    .values()
+                    .any(|player| player.is_win());
+
+                if has_winner {
+                    self.state = ServerState::Finished
+                }
+            },
+
+            ServerState::Finished => { }
+        }
+    }
+
+    fn is_playing(&self) -> bool {
+        match self.state {
+            ServerState::Playing => true,
+            _ => false
+        }
+    }
+
     fn update_players(&mut self, dt: f64) {
         for player in self.players.values_mut() {
             let planets_count = self.planets
                 .values()
                 .filter(|planet| planet.owner().map_or(false, |owner| player.id() == owner))
                 .count();
+
+            if planets_count == 0 {
+                player.set_loose_state();
+            }
+
+            if planets_count == self.planets.len() {
+                player.set_win_state();
+            }
 
             let gold = player.gold() + 1_f64 * (planets_count as f64).powf(1_f64 / 3_f64) * dt;
             player.set_gold(gold);
@@ -391,7 +460,12 @@ impl Server {
     }
 
     fn add_player(&mut self, sender: Sender) {
-        let player = Player::new(sender);
+        if self.is_playing() {
+            return;
+        }
+
+        let player_name = format!("Player #{}", self.players.len() + 1);
+        let player = Player::new(sender, player_name);
 
         let ref mut players = self.players;
 

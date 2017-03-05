@@ -5,7 +5,7 @@ use rustc_serialize::json::{Json, Object};
 use common::{Id, PlayerId, ParseCommandResult, Position, utils};
 use common::utils::json;
 use server::planet::Planet;
-use server::player::Player;
+use server::player::{Player, PlayerState};
 use server::squad::Squad;
 
 type Result<T> = ParseCommandResult<T>;
@@ -72,10 +72,31 @@ pub fn format_planets(planets: &HashMap<Id, Planet>) -> String {
 pub fn format_players(players: &HashMap<PlayerId, Player>) -> String {
     let formatted_players = players
         .values()
-        .map(|player| format!(r#"{{"id":{}}}"#, player.id()))
+        .map(|player| {
+            let player_state = format_player_state(&player);
+
+            format!(
+                r#"{{"id":{},"name":"{}","state":"{}"}}"#,
+                player.id(),
+                player.name(),
+                player_state
+            )
+        })
         .collect::<Vec<String>>();
 
     format!("[{}]", utils::join(formatted_players, ","))
+}
+
+fn format_player_state(player: &Player) -> String {
+    let state = match *player.state() {
+        PlayerState::Pending => "pending",
+        PlayerState::Playing => "playing",
+        PlayerState::Ready => "ready",
+        PlayerState::Win => "win",
+        PlayerState::Loose => "loose"
+    };
+
+    state.to_string()
 }
 
 pub fn format_squads(squads: &HashMap<Id, Squad>) -> String {
