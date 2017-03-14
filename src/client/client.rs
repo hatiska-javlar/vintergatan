@@ -2,13 +2,15 @@ use std::thread;
 use std::collections::HashMap;
 use std::env::current_dir;
 
-use piston::window::WindowSettings;
-use piston::event_loop::*;
-use piston::input::*;
-use piston::window::{Window, Size};
-use glutin_window::GlutinWindow;
-use opengl_graphics::{GlGraphics, OpenGL};
-use opengl_graphics::glyph_cache::GlyphCache;
+use piston_window::{
+    OpenGL,
+    PistonWindow, Window, WindowSettings, AdvancedWindow, Size,
+    clear, rectangle, ellipse, text, Ellipse, Transformed,
+    Input, UpdateArgs, RenderArgs,
+    Key, MouseButton, Button, Motion,
+    Glyphs as GlyphCache
+};
+
 use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
@@ -22,9 +24,8 @@ use common::websocket_handler::WebsocketHandler;
 use common::utils;
 
 pub struct Client {
-    window: GlutinWindow,
-    gl: GlGraphics,
-    glyph_cache: GlyphCache<'static>,
+    window: PistonWindow,
+    glyph_cache: GlyphCache,
     rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: [f64; 2],
@@ -45,18 +46,17 @@ impl Client {
     pub fn new() -> Self {
         let opengl = OpenGL::V3_2;
 
-        let window = WindowSettings::new("Vintergatan game", [1280, 800])
+        let window: PistonWindow = WindowSettings::new("Vintergatan game", [1280, 800])
             .opengl(opengl)
             .exit_on_esc(true)
             .build()
             .unwrap();
 
-        let gl = GlGraphics::new(opengl);
+        let window_factory = window.factory.clone();
 
         Client {
             window: window,
-            gl: gl,
-            glyph_cache: GlyphCache::new(current_dir().unwrap().join("assets/Exo2-Regular.ttf")).unwrap(),
+            glyph_cache: GlyphCache::new(current_dir().unwrap().join("assets/Exo2-Regular.ttf"), window_factory).unwrap(),
             rx: None,
 
             cursor_position: [0f64, 0f64],
@@ -80,22 +80,21 @@ impl Client {
         self.rx = Some(rx);
         thread::spawn(move || connect(format!("ws://{}", address), |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
-        let mut events = self.window.events();
-        while let Some(e) = events.next(&mut self.window) {
-            if let Some(r) = e.render_args() {
-                self.render(&r);
-            }
+        while let Some(event) = self.window.next() {
+            match event {
+                Input::Move(Motion::MouseCursor(x, y)) => {
+                    self.cursor_position = [x, y];
+                }
 
-            if let Some(u) = e.update_args() {
-                self.update(&u);
-            }
+                Input::Render(args) => {
+                    self.render(&args, event);
+                }
 
-            if let Some(m) = e.mouse_cursor_args() {
-                self.cursor_position = m;
-            }
+                Input::Update(args) => {
+                    self.update(&args);
+                }
 
-            match e {
-                Event::Input(Input::Press(Button::Keyboard(Key::Space))) => {
+                Input::Press(Button::Keyboard(Key::Space)) => {
                     let command_json = json::format_ready_command();
 
                     if let Some(ref sender) = self.sender {
@@ -103,13 +102,13 @@ impl Client {
                     }
                 }
 
-                Event::Input(Input::Press(Button::Mouse(MouseButton::Left))) => {
+                Input::Press(Button::Mouse(MouseButton::Left)) => {
                     let cursor_position = self.cursor_position;
                     self.select_planet(cursor_position);
                     self.select_squad(cursor_position);
                 }
 
-                Event::Input(Input::Press(Button::Mouse(MouseButton::Right))) => {
+                Input::Press(Button::Mouse(MouseButton::Right)) => {
                     if let Some(squad_id) = self.current_selected_squad {
                         let cursor_position = self.cursor_position;
 
@@ -126,7 +125,7 @@ impl Client {
                     }
                 }
 
-                Event::Input(Input::Press(Button::Keyboard(Key::B))) => {
+                Input::Press(Button::Keyboard(Key::B)) => {
                     if let Some(planet_id) = self.current_selected_planet {
                         if let Some(ref sender) = self.sender {
                             let command_json = json::format_squad_spawn_command(planet_id);
@@ -135,31 +134,28 @@ impl Client {
                     }
                 }
 
-                Event::Input(Input::Press(Button::Keyboard(Key::LCtrl))) => {
+                Input::Press(Button::Keyboard(Key::LCtrl)) => {
                     self.is_control_key = true;
                 }
 
-                Event::Input(Input::Release(Button::Keyboard(Key::LCtrl))) => {
+                Input::Release(Button::Keyboard(Key::LCtrl)) => {
                     self.is_control_key = false;
                 }
 
-                Event::Input(Input::Press(Button::Keyboard(Key::LShift))) => {
+                Input::Press(Button::Keyboard(Key::LShift)) => {
                     self.is_shift_key = true;
                 }
 
-                Event::Input(Input::Release(Button::Keyboard(Key::LShift))) => {
+                Input::Release(Button::Keyboard(Key::LShift)) => {
                     self.is_shift_key = false;
                 }
 
                 _ => { }
             }
-
         }
     }
 
-    fn render(&mut self, args: &RenderArgs) {
-        use graphics::*;
-
+    fn render(&mut self, args: &RenderArgs, event: Input) {
         const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
         const GOLD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
         const SELECTION_COLOR:[f32; 4] = [0.0, 1.0, 0.0, 0.2];
@@ -186,7 +182,7 @@ impl Client {
         let current_selected_planet = self.current_selected_planet;
         let current_selected_squad = self.current_selected_squad;
 
-        self.gl.draw(args.viewport(), |c, gl| {
+        self.window.draw_2d(&event, |c, gl| {
             clear(SPACE_COLOR, gl);
             for (_, planet) in planets {
                 let Position(planet_x, planet_y) = planet.position();
