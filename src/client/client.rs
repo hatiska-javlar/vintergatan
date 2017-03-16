@@ -22,6 +22,8 @@ use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
+use client::game_event::GameEvent;
+use client::input_mapping;
 use client::json;
 use client::planet::Planet;
 use client::player::Player;
@@ -58,8 +60,8 @@ pub struct Client {
 
     current_selected_planet: Option<Id>,
     current_selected_squad: Option<Id>,
-    is_control_key: bool,
-    is_shift_key: bool,
+    is_modifier1: bool,
+    is_modifier2: bool,
     sender: Option<Sender>,
 
     ui: conrod::Ui,
@@ -141,8 +143,8 @@ impl Client {
 
             current_selected_planet: None,
             current_selected_squad: None,
-            is_control_key: false,
-            is_shift_key: false,
+            is_modifier1: false,
+            is_modifier2: false,
             sender: None,
 
             ui: ui,
@@ -161,10 +163,6 @@ impl Client {
 
         while let Some(event) = self.window.next() {
             match event {
-                Input::Move(Motion::MouseCursor(x, y)) => {
-                    self.cursor_position = [x, y];
-                }
-
                 Input::Render(args) => {
                     self.render(&args, &event);
                     self.render_ui(&event);
@@ -175,63 +173,9 @@ impl Client {
                     self.update_ui();
                 }
 
-                Input::Press(Button::Keyboard(Key::Space)) => {
-                    let command_json = json::format_ready_command();
-
-                    if let Some(ref sender) = self.sender {
-                        sender.send(command_json);
-                    }
+                _ => {
+                    self.process_input(&event);
                 }
-
-                Input::Press(Button::Mouse(MouseButton::Left)) => {
-                    let cursor_position = self.cursor_position;
-                    self.select_planet(cursor_position);
-                    self.select_squad(cursor_position);
-                }
-
-                Input::Press(Button::Mouse(MouseButton::Right)) => {
-                    if let Some(squad_id) = self.current_selected_squad {
-                        let cursor_position = self.cursor_position;
-
-                        let Size { width, height } = self.window.size();
-
-                        let x = cursor_position[0] - width as f64 / 2.0;
-                        let y = -cursor_position[1] + height as f64 / 2.0;
-
-                        if let Some(ref sender) = self.sender {
-                            let cut_count = self.get_cut_count();
-                            let command_json = json::format_squad_move_command(squad_id, x, y, cut_count);
-                            sender.send(command_json);
-                        }
-                    }
-                }
-
-                Input::Press(Button::Keyboard(Key::B)) => {
-                    if let Some(planet_id) = self.current_selected_planet {
-                        if let Some(ref sender) = self.sender {
-                            let command_json = json::format_squad_spawn_command(planet_id);
-                            sender.send(command_json);
-                        }
-                    }
-                }
-
-                Input::Press(Button::Keyboard(Key::LCtrl)) => {
-                    self.is_control_key = true;
-                }
-
-                Input::Release(Button::Keyboard(Key::LCtrl)) => {
-                    self.is_control_key = false;
-                }
-
-                Input::Press(Button::Keyboard(Key::LShift)) => {
-                    self.is_shift_key = true;
-                }
-
-                Input::Release(Button::Keyboard(Key::LShift)) => {
-                    self.is_shift_key = false;
-                }
-
-                _ => { }
             }
         }
     }
@@ -440,23 +384,100 @@ impl Client {
         }
     }
 
+    fn process_input(&mut self, event: &Input) {
+        for mapping in self.get_input_mapping() {
+            if let Some(game_event) = mapping(&event) {
+                match game_event {
+                    GameEvent::ReadyToPlay => {
+                        let command_json = json::format_ready_command();
+
+                        if let Some(ref sender) = self.sender {
+                            sender.send(command_json);
+                        }
+                    },
+
+                    GameEvent::Cursor(x, y) => {
+                        self.cursor_position = [x, y];
+                    },
+
+                    GameEvent::SelectStart => {
+                        let cursor_position = self.cursor_position;
+                        self.select_planet(cursor_position);
+                        self.select_squad(cursor_position);
+
+
+                    },
+
+                    GameEvent::SquadSpawn => {
+                        if let Some(planet_id) = self.current_selected_planet {
+                            if let Some(ref sender) = self.sender {
+                                let command_json = json::format_squad_spawn_command(planet_id);
+                                sender.send(command_json);
+                            }
+                        }
+                    },
+
+                    GameEvent::SquadMove => {
+                        if let Some(squad_id) = self.current_selected_squad {
+                            let cursor_position = self.cursor_position;
+
+                            let Size { width, height } = self.window.size();
+
+                            let x = cursor_position[0] - width as f64 / 2.0;
+                            let y = -cursor_position[1] + height as f64 / 2.0;
+
+                            if let Some(ref sender) = self.sender {
+                                let cut_count = self.get_cut_count();
+                                let command_json = json::format_squad_move_command(squad_id, x, y, cut_count);
+                                sender.send(command_json);
+                            }
+                        }
+                    },
+
+                    GameEvent::Modifier1Start => {
+                        self.is_modifier1 = true;
+                    },
+
+                    GameEvent::Modifier1End => {
+                        self.is_modifier1 = false;
+                    },
+
+                    GameEvent::Modifier2Start => {
+                        self.is_modifier2 = true;
+                    },
+
+                    GameEvent::Modifier2End => {
+                        self.is_modifier2 = false;
+                    },
+
+                    _ => { }
+                }
+
+                break;
+            }
+        }
+    }
+
+    fn get_input_mapping(&self) -> Vec<fn(&Input) -> Option<GameEvent>> {
+        vec![
+            input_mapping::map_squad_input,
+            input_mapping::map_planet_input,
+            input_mapping::map_root_input
+        ]
+    }
+
     fn select_planet(&mut self, cursor: [f64; 2]) {
         let Size { width, height } = self.window.size();
 
         let x = cursor[0] - width as f64 / 2.0;
         let y = -cursor[1] + height as f64 / 2.0;
 
-        self.current_selected_planet = None;
+        let cursor_position = Position(x, y);
 
-        let planets = &mut self.planets;
-        for (_, planet) in planets {
-            let Position(planet_x, planet_y) = planet.position();
-            let distance = ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt();
-
-            if distance < 20.0 {
-                self.current_selected_planet = Some(planet.id());
-            }
-        }
+        self.current_selected_planet = self.planets
+            .values()
+            .find(|planet| cursor_position.distance_to(planet.position()) < 20_f64)
+            .map(|planet| planet.id());
     }
 
     fn select_squad(&mut self, cursor: [f64; 2]) {
@@ -465,27 +486,24 @@ impl Client {
         let x = cursor[0] - width as f64 / 2.0;
         let y = -cursor[1] + height as f64 / 2.0;
 
+        let cursor_position = Position(x, y);
+
         self.current_selected_squad = self.squads
             .values()
-            .find(|squad| {
-                let Position(squad_x, squad_y) = squad.position();
-                let distance = ((squad_x - x).powi(2) + (squad_y - y).powi(2)).sqrt();
-
-                distance < 10_f64
-            })
+            .find(|squad| cursor_position.distance_to(squad.position()) < 10_f64)
             .map(|squad| squad.id());
     }
 
     fn get_cut_count(&self) -> Option<u64> {
-        if self.is_control_key && self.is_shift_key {
+        if self.is_modifier1 && self.is_modifier2 {
             return Some(1);
         }
 
-        if self.is_control_key {
+        if self.is_modifier1 {
             return Some(10);
         }
 
-        if self.is_shift_key {
+        if self.is_modifier2 {
             return Some(50);
         }
 
