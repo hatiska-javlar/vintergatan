@@ -7,8 +7,13 @@ authors = ["Fedor Gorbunov <raigfp@yandex-team.ru>", "Ilya Telegin <ilya.a.teleg
 getopts = "0.2"
 piston = "0.26.0"
 piston2d-graphics = "0.17.0"
-piston_window = "0.64.0"
+piston_window = "0.63.0"
 piston2d-opengl_graphics = "0.34.0"
 ws = "0.5.3"
 rand = "0.3.14"
 rustc-serialize = "0.3.16"
+gfx_device_gl = "0.13.0"
+
+[dependencies.conrod]
+version = "0.51.0"
+features = ["winit", "glium", "piston"]

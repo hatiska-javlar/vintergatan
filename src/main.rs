@@ -5,6 +5,8 @@ extern crate opengl_graphics;
 extern crate ws;
 extern crate rand;
 extern crate rustc_serialize;
+#[macro_use] extern crate conrod;
+extern crate gfx_device_gl;
 
 use getopts::Options;
 use std::env;

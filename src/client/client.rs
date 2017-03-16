@@ -1,15 +1,22 @@
 use std::thread;
 use std::collections::HashMap;
 use std::env::current_dir;
+use std::time::Duration;
+use std::cmp::min;
 
+use piston_window;
 use piston_window::{
     OpenGL,
-    PistonWindow, Window, WindowSettings, AdvancedWindow, Size,
-    clear, rectangle, ellipse, text, Ellipse, Transformed,
-    Input, UpdateArgs, RenderArgs,
+    PistonWindow, Window, WindowSettings, Size,
+    clear, ellipse, text, Ellipse, Transformed,
+    Input, RenderArgs,
     Key, MouseButton, Button, Motion,
-    Glyphs as GlyphCache
+    G2d, G2dTexture, TextureSettings, Texture
 };
+use piston_window::texture::UpdateTexture;
+
+use conrod;
+use gfx_device_gl;
 
 use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
@@ -21,11 +28,25 @@ use client::player::Player;
 use client::squad::Squad;
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
-use common::utils;
+
+widget_ids! {
+    pub struct UiIds {
+        master,
+
+        header,
+        header_items[],
+
+        body,
+
+        gold,
+        planets,
+        players[]
+    }
+}
 
 pub struct Client {
     window: PistonWindow,
-    glyph_cache: GlyphCache,
+    glyph_cache: piston_window::Glyphs,
     rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: [f64; 2],
@@ -39,24 +60,76 @@ pub struct Client {
     current_selected_squad: Option<Id>,
     is_control_key: bool,
     is_shift_key: bool,
-    sender: Option<Sender>
+    sender: Option<Sender>,
+
+    ui: conrod::Ui,
+    ui_ids: UiIds,
+    ui_image_map: conrod::image::Map<Texture<gfx_device_gl::Resources>>,
+    ui_glyph_cache: conrod::text::GlyphCache,
+    ui_text_texture_cache: Texture<gfx_device_gl::Resources>
 }
 
 impl Client {
     pub fn new() -> Self {
+        use conrod::position::{Padding, Position, Relative, Align, Direction};
+
+        const WIDTH: u32 = 1280;
+        const HEIGHT: u32 = 800;
+
         let opengl = OpenGL::V3_2;
 
-        let window: PistonWindow = WindowSettings::new("Vintergatan game", [1280, 800])
-            .opengl(opengl)
-            .exit_on_esc(true)
-            .build()
-            .unwrap();
+        let window: PistonWindow =
+            WindowSettings::new("Vintergatan game", [WIDTH, HEIGHT])
+                .opengl(opengl)
+                .exit_on_esc(true)
+                .build()
+                .unwrap();
 
         let window_factory = window.factory.clone();
 
+        let theme = conrod::Theme {
+            name: "Vintergatan theme".to_string(),
+            padding: Padding::none(),
+            x_position: Position::Relative(Relative::Align(Align::Start), None),
+            y_position: Position::Relative(Relative::Direction(Direction::Backwards, 20.0), None),
+            background_color: conrod::color::TRANSPARENT,
+            shape_color: conrod::color::LIGHT_CHARCOAL,
+            border_color: conrod::color::BLACK,
+            border_width: 0.0,
+            label_color: conrod::color::WHITE,
+            font_id: None,
+            font_size_large: 18,
+            font_size_medium: 14,
+            font_size_small: 12,
+            widget_styling: HashMap::new(),
+            mouse_drag_threshold: 0.0,
+            double_click_threshold: Duration::from_millis(500),
+        };
+
+        let mut ui = conrod::UiBuilder::new([WIDTH as f64, HEIGHT as f64])
+            .theme(theme)
+            .build();
+
+        let font_path = current_dir().unwrap().join("assets/Exo2-Regular.ttf");
+        ui.fonts.insert_from_file(&font_path).unwrap();
+
+        let (ui_glyph_cache, ui_text_texture_cache) = {
+            const SCALE_TOLERANCE: f32 = 0.1;
+            const POSITION_TOLERANCE: f32 = 0.1;
+            let cache = conrod::text::GlyphCache::new(WIDTH, HEIGHT, SCALE_TOLERANCE, POSITION_TOLERANCE);
+            let buffer_len = WIDTH as usize * HEIGHT as usize;
+            let init = vec![128; buffer_len];
+            let settings = TextureSettings::new();
+            let factory = &mut window.factory.clone();
+            let texture = G2dTexture::from_memory_alpha(factory, &init, WIDTH, HEIGHT, &settings).unwrap();
+            (cache, texture)
+        };
+
+        let ui_ids = UiIds::new(ui.widget_id_generator());
+
         Client {
             window: window,
-            glyph_cache: GlyphCache::new(current_dir().unwrap().join("assets/Exo2-Regular.ttf"), window_factory).unwrap(),
+            glyph_cache: piston_window::Glyphs::new(&font_path, window_factory).unwrap(),
             rx: None,
 
             cursor_position: [0f64, 0f64],
@@ -70,7 +143,13 @@ impl Client {
             current_selected_squad: None,
             is_control_key: false,
             is_shift_key: false,
-            sender: None
+            sender: None,
+
+            ui: ui,
+            ui_ids: ui_ids,
+            ui_image_map: conrod::image::Map::new(),
+            ui_glyph_cache: ui_glyph_cache,
+            ui_text_texture_cache: ui_text_texture_cache
         }
     }
 
@@ -87,11 +166,13 @@ impl Client {
                 }
 
                 Input::Render(args) => {
-                    self.render(&args, event);
+                    self.render(&args, &event);
+                    self.render_ui(&event);
                 }
 
-                Input::Update(args) => {
-                    self.update(&args);
+                Input::Update(_) => {
+                    self.update();
+                    self.update_ui();
                 }
 
                 Input::Press(Button::Keyboard(Key::Space)) => {
@@ -155,9 +236,8 @@ impl Client {
         }
     }
 
-    fn render(&mut self, args: &RenderArgs, event: Input) {
+    fn render(&mut self, args: &RenderArgs, event: &Input) {
         const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
-        const GOLD_COLOR:[f32; 4] = [0.870588235, 0.850980392, 0.529411765, 1.0];
         const SELECTION_COLOR:[f32; 4] = [0.0, 1.0, 0.0, 0.2];
         const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
         const MY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.50588235, 0.35686275, 1.0];
@@ -173,16 +253,14 @@ impl Client {
         let (center_x, center_y) = ((args.width / 2) as f64, (args.height / 2) as f64);
 
         let planets = &self.planets;
-        let players = &self.players;
         let squads = &self.squads;
         let glyph_cache = &mut self.glyph_cache;
-        let gold = self.gold;
         let me = self.me;
 
         let current_selected_planet = self.current_selected_planet;
         let current_selected_squad = self.current_selected_squad;
 
-        self.window.draw_2d(&event, |c, gl| {
+        self.window.draw_2d(event, |c, gl| {
             clear(SPACE_COLOR, gl);
             for (_, planet) in planets {
                 let Position(planet_x, planet_y) = planet.position();
@@ -242,44 +320,47 @@ impl Client {
                     gl
                 );
             }
-
-            text(
-                GOLD_COLOR,
-                14,
-                &format!("Gold: {}", gold.floor()),
-                glyph_cache,
-                c.transform.trans(5.0, 17.0),
-                gl
-            );
-
-            text(
-                GOLD_COLOR,
-                14,
-                &format!("Planets: {}", planets.values().filter(|&planet|
-                    planet.owner().map_or(false, |owner| owner == me)).count()),
-                glyph_cache,
-                c.transform.trans(100.0, 17.0),
-                gl
-            );
-
-            let mut players_state = players.values()
-                .map(|player| format!("{}: {}", player.name(), player.state()))
-                .collect::<Vec<_>>();
-
-            players_state.sort();
-
-            text(
-                GOLD_COLOR,
-                14,
-                &utils::join(players_state, ", "),
-                glyph_cache,
-                c.transform.trans(200.0, 17.0),
-                gl
-            )
         });
     }
 
-    fn update(&mut self, args: &UpdateArgs) {
+    fn render_ui(&mut self, event: &Input) {
+        let ref mut ui_text_texture_cache = &mut self.ui_text_texture_cache;
+        let ref mut ui_glyph_cache = &mut self.ui_glyph_cache;
+        let ref ui_image_map = &self.ui_image_map;
+        let primitives = self.ui.draw();
+
+        self.window.draw_2d(event, |c, gl| {
+            let cache_queued_glyphs = |graphics: &mut G2d,
+                                       cache: &mut G2dTexture,
+                                       rect: conrod::text::rt::Rect<u32>,
+                                       data: &[u8]|
+                {
+                    let offset = [rect.min.x, rect.min.y];
+                    let size = [rect.width(), rect.height()];
+                    let format = piston_window::texture::Format::Rgba8;
+                    let encoder = &mut graphics.encoder;
+                    let mut text_vertex_data = Vec::new();
+                    text_vertex_data.extend(data.iter().flat_map(|&b| vec![255, 255, 255, b]));
+                    UpdateTexture::update(cache, encoder, format, &text_vertex_data[..], offset, size)
+                        .expect("failed to update texture")
+                };
+
+            fn texture_from_image<T>(img: &T) -> &T { img }
+
+            conrod::backend::piston::draw::primitives(
+                primitives,
+                c,
+                gl,
+                ui_text_texture_cache,
+                ui_glyph_cache,
+                ui_image_map,
+                cache_queued_glyphs,
+                texture_from_image
+            );
+        });
+    }
+
+    fn update(&mut self) {
         if let Some(ref rx) = self.rx {
             while let Ok(command) = rx.try_recv() {
                 match command {
@@ -296,6 +377,66 @@ impl Client {
                     _ => { }
                 }
             };
+        }
+    }
+
+    fn update_ui(&mut self) {
+        use conrod::{Widget, widget, Colorable, color, Positionable};
+
+        const HEADER_ITEMS_COUNT: usize = 8;
+        const HEADER_PADDING: f64 = 10.0;
+
+        let mut ui = self.ui.set_widgets();
+
+        self.ui_ids.header_items.resize(HEADER_ITEMS_COUNT, &mut ui.widget_id_generator());
+        self.ui_ids.players.resize(self.players.len(), &mut ui.widget_id_generator());
+
+        let mut header_items = vec![];
+        for i in 0..HEADER_ITEMS_COUNT {
+            header_items.push(
+                (
+                    self.ui_ids.header_items[i],
+                    widget::Canvas::new().pad_left(HEADER_PADDING).pad_right(HEADER_PADDING)
+                )
+            )
+        }
+
+        widget::Canvas::new().flow_down(&[
+            (
+                self.ui_ids.header,
+                widget::Canvas::new().length(30.0).color(color::DARK_CHARCOAL).flow_right(&header_items)
+            ),
+            (self.ui_ids.body, widget::Canvas::new())
+        ]).set(self.ui_ids.master, &mut ui);
+
+        widget::Text::new(&format!("Gold: {}", self.gold.floor()))
+            .color(color::LIGHT_BLUE)
+            .mid_left_of(self.ui_ids.header_items[0])
+            .set(self.ui_ids.gold, &mut ui);
+
+        let planets = self.planets.values();
+        let me = self.me;
+        let planets_count = &format!(
+            "Planets: {}",
+            planets.filter(|&planet| planet.owner().map_or(false, |owner| owner == me)).count()
+        );
+
+        widget::Text::new(planets_count)
+            .color(color::LIGHT_BLUE)
+            .mid_left_of(self.ui_ids.header_items[1])
+            .set(self.ui_ids.planets, &mut ui);
+
+        let mut players_state = self.players.values()
+            .map(|player| format!("{}: {}", player.name(), player.state()))
+            .collect::<Vec<_>>();
+
+        players_state.sort();
+        let players_state_slice = &players_state[0..min(4, players_state.len())];
+        for i in 0..players_state_slice.len() {
+            widget::Text::new(&players_state_slice[i])
+                .color(color::LIGHT_BLUE)
+                .mid_left_of(self.ui_ids.header_items[HEADER_ITEMS_COUNT - players_state_slice.len() + i])
+                .set(self.ui_ids.players[i], &mut ui);
         }
     }
 
