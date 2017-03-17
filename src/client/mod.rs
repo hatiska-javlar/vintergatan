@@ -1,5 +1,7 @@
 mod client;
 mod command;
+mod game_event;
+mod input_mapping;
 mod json;
 mod planet;
 mod player;

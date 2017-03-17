@@ -7,11 +7,11 @@ use std::cmp::min;
 use piston_window;
 use piston_window::{
     OpenGL,
-    PistonWindow, Window, WindowSettings, Size,
-    clear, ellipse, text, Ellipse, Transformed,
+    PistonWindow, Window, AdvancedWindow, WindowSettings, Size,
+    clear, ellipse, text, image, Ellipse, Transformed,
     Input, RenderArgs,
-    Key, MouseButton, Button, Motion,
-    G2d, G2dTexture, TextureSettings, Texture
+    Key, MouseButton, Motion,
+    G2d, G2dTexture, TextureSettings, Texture, Flip
 };
 use piston_window::texture::UpdateTexture;
 
@@ -22,6 +22,8 @@ use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
+use client::game_event::GameEvent;
+use client::input_mapping;
 use client::json;
 use client::planet::Planet;
 use client::player::Player;
@@ -49,7 +51,9 @@ pub struct Client {
     glyph_cache: piston_window::Glyphs,
     rx: Option<ChannelReceiver<Command>>,
 
-    cursor_position: [f64; 2],
+    cursor_position: (f64, f64),
+    cursor_icon: Texture<gfx_device_gl::Resources>,
+
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
     squads: HashMap<Id, Squad>,
@@ -58,8 +62,8 @@ pub struct Client {
 
     current_selected_planet: Option<Id>,
     current_selected_squad: Option<Id>,
-    is_control_key: bool,
-    is_shift_key: bool,
+    is_modifier1: bool,
+    is_modifier2: bool,
     sender: Option<Sender>,
 
     ui: conrod::Ui,
@@ -78,12 +82,14 @@ impl Client {
 
         let opengl = OpenGL::V3_2;
 
-        let window: PistonWindow =
+        let mut window: PistonWindow =
             WindowSettings::new("Vintergatan game", [WIDTH, HEIGHT])
                 .opengl(opengl)
                 .exit_on_esc(true)
                 .build()
                 .unwrap();
+
+        window.set_capture_cursor(true);
 
         let window_factory = window.factory.clone();
 
@@ -113,6 +119,14 @@ impl Client {
         let font_path = current_dir().unwrap().join("assets/Exo2-Regular.ttf");
         ui.fonts.insert_from_file(&font_path).unwrap();
 
+        let cursor_icon_path = current_dir().unwrap().join("assets/cursor.png");
+        let cursor_icon = Texture::from_path(
+            &mut window.factory,
+            &cursor_icon_path,
+            Flip::None,
+            &TextureSettings::new()
+        ).unwrap();
+
         let (ui_glyph_cache, ui_text_texture_cache) = {
             const SCALE_TOLERANCE: f32 = 0.1;
             const POSITION_TOLERANCE: f32 = 0.1;
@@ -132,7 +146,9 @@ impl Client {
             glyph_cache: piston_window::Glyphs::new(&font_path, window_factory).unwrap(),
             rx: None,
 
-            cursor_position: [0f64, 0f64],
+            cursor_position: (0_f64, 0_f64),
+            cursor_icon: cursor_icon,
+
             planets: HashMap::new(),
             players: HashMap::new(),
             squads: HashMap::new(),
@@ -141,8 +157,8 @@ impl Client {
 
             current_selected_planet: None,
             current_selected_squad: None,
-            is_control_key: false,
-            is_shift_key: false,
+            is_modifier1: false,
+            is_modifier2: false,
             sender: None,
 
             ui: ui,
@@ -161,10 +177,6 @@ impl Client {
 
         while let Some(event) = self.window.next() {
             match event {
-                Input::Move(Motion::MouseCursor(x, y)) => {
-                    self.cursor_position = [x, y];
-                }
-
                 Input::Render(args) => {
                     self.render(&args, &event);
                     self.render_ui(&event);
@@ -175,63 +187,10 @@ impl Client {
                     self.update_ui();
                 }
 
-                Input::Press(Button::Keyboard(Key::Space)) => {
-                    let command_json = json::format_ready_command();
-
-                    if let Some(ref sender) = self.sender {
-                        sender.send(command_json);
-                    }
+                _ => {
+                    self.process_input(&event);
+                    self.process_ui(event);
                 }
-
-                Input::Press(Button::Mouse(MouseButton::Left)) => {
-                    let cursor_position = self.cursor_position;
-                    self.select_planet(cursor_position);
-                    self.select_squad(cursor_position);
-                }
-
-                Input::Press(Button::Mouse(MouseButton::Right)) => {
-                    if let Some(squad_id) = self.current_selected_squad {
-                        let cursor_position = self.cursor_position;
-
-                        let Size { width, height } = self.window.size();
-
-                        let x = cursor_position[0] - width as f64 / 2.0;
-                        let y = -cursor_position[1] + height as f64 / 2.0;
-
-                        if let Some(ref sender) = self.sender {
-                            let cut_count = self.get_cut_count();
-                            let command_json = json::format_squad_move_command(squad_id, x, y, cut_count);
-                            sender.send(command_json);
-                        }
-                    }
-                }
-
-                Input::Press(Button::Keyboard(Key::B)) => {
-                    if let Some(planet_id) = self.current_selected_planet {
-                        if let Some(ref sender) = self.sender {
-                            let command_json = json::format_squad_spawn_command(planet_id);
-                            sender.send(command_json);
-                        }
-                    }
-                }
-
-                Input::Press(Button::Keyboard(Key::LCtrl)) => {
-                    self.is_control_key = true;
-                }
-
-                Input::Release(Button::Keyboard(Key::LCtrl)) => {
-                    self.is_control_key = false;
-                }
-
-                Input::Press(Button::Keyboard(Key::LShift)) => {
-                    self.is_shift_key = true;
-                }
-
-                Input::Release(Button::Keyboard(Key::LShift)) => {
-                    self.is_shift_key = false;
-                }
-
-                _ => { }
             }
         }
     }
@@ -329,6 +288,9 @@ impl Client {
         let ref ui_image_map = &self.ui_image_map;
         let primitives = self.ui.draw();
 
+        let ref cursor_icon = self.cursor_icon;
+        let (cursor_x, cursor_y) = self.cursor_position;
+
         self.window.draw_2d(event, |c, gl| {
             let cache_queued_glyphs = |graphics: &mut G2d,
                                        cache: &mut G2dTexture,
@@ -357,6 +319,8 @@ impl Client {
                 cache_queued_glyphs,
                 texture_from_image
             );
+
+            image(cursor_icon, c.transform.trans(cursor_x, cursor_y), gl);
         });
     }
 
@@ -440,55 +404,173 @@ impl Client {
         }
     }
 
-    fn select_planet(&mut self, cursor: [f64; 2]) {
-        let Size { width, height } = self.window.size();
+    fn process_input(&mut self, event: &Input) {
+        for mapping in self.get_input_mapping() {
+            if let Some(game_event) = mapping(&event) {
+                match game_event {
+                    GameEvent::ReadyToPlay => {
+                        let command_json = json::format_ready_command();
 
-        let x = cursor[0] - width as f64 / 2.0;
-        let y = -cursor[1] + height as f64 / 2.0;
+                        if let Some(ref sender) = self.sender {
+                            sender.send(command_json);
+                        }
+                    },
 
-        self.current_selected_planet = None;
+                    GameEvent::Cursor(dx, dy) => {
+                        let (dx, dy) = self.normalize_mouse_cursor(dx, dy);
+                        let (cursor_x, cursor_y) = self.cursor_position;
 
-        let planets = &mut self.planets;
-        for (_, planet) in planets {
-            let Position(planet_x, planet_y) = planet.position();
-            let distance = ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt();
+                        let x = cursor_x + dx;
+                        let y = cursor_y + dy;
 
-            if distance < 20.0 {
-                self.current_selected_planet = Some(planet.id());
+                        let Size { width, height } = self.window.size();
+
+                        self.cursor_position = (
+                            x.max(0_f64).min(width as f64),
+                            y.max(0_f64).min(height as f64)
+                        );
+                    },
+
+                    GameEvent::SelectStart => {
+                        self.select_planet();
+                        self.select_squad();
+                    },
+
+                    GameEvent::SquadSpawn => {
+                        if let Some(planet_id) = self.current_selected_planet {
+                            if let Some(ref sender) = self.sender {
+                                let command_json = json::format_squad_spawn_command(planet_id);
+                                sender.send(command_json);
+                            }
+                        }
+                    },
+
+                    GameEvent::SquadMove => {
+                        if let Some(squad_id) = self.current_selected_squad {
+                            let (cursor_x, cursor_y) = self.cursor_position;
+
+                            let Size { width, height } = self.window.size();
+
+                            let x = cursor_x - width as f64 / 2.0;
+                            let y = -cursor_y + height as f64 / 2.0;
+
+                            if let Some(ref sender) = self.sender {
+                                let cut_count = self.get_cut_count();
+                                let command_json = json::format_squad_move_command(squad_id, x, y, cut_count);
+                                sender.send(command_json);
+                            }
+                        }
+                    },
+
+                    GameEvent::Modifier1Start => {
+                        self.is_modifier1 = true;
+                    },
+
+                    GameEvent::Modifier1End => {
+                        self.is_modifier1 = false;
+                    },
+
+                    GameEvent::Modifier2Start => {
+                        self.is_modifier2 = true;
+                    },
+
+                    GameEvent::Modifier2End => {
+                        self.is_modifier2 = false;
+                    },
+
+                    _ => { }
+                }
+
+                break;
             }
         }
     }
 
-    fn select_squad(&mut self, cursor: [f64; 2]) {
+    fn process_ui(&mut self, event: Input) {
         let Size { width, height } = self.window.size();
+        let (cursor_x, cursor_y) = self.cursor_position;
 
-        let x = cursor[0] - width as f64 / 2.0;
-        let y = -cursor[1] + height as f64 / 2.0;
+        match event {
+            Input::Move(Motion::MouseRelative(_, _)) => {
+                let mouse_cursor_motion = Motion::MouseCursor(
+                    cursor_x - width as f64 / 2_f64,
+                    -cursor_y + height as f64 / 2_f64
+                );
+                let conrod_event = conrod::event::Input::Move(mouse_cursor_motion);
+                self.ui.handle_event(conrod_event);
+            },
+
+            _ => {
+                if let Some(e) = conrod::backend::piston::event::convert(event, width as f64, height as f64) {
+                    self.ui.handle_event(e);
+                }
+            }
+        }
+    }
+
+    fn get_input_mapping(&self) -> Vec<fn(&Input) -> Option<GameEvent>> {
+        vec![
+            input_mapping::map_squad_input,
+            input_mapping::map_planet_input,
+            input_mapping::map_root_input
+        ]
+    }
+
+    fn select_planet(&mut self) {
+        let Size { width, height } = self.window.size();
+        let (cursor_x, cursor_y) = self.cursor_position;
+
+        let x = cursor_x - width as f64 / 2.0;
+        let y = -cursor_y + height as f64 / 2.0;
+
+        let cursor_position = Position(x, y);
+
+        self.current_selected_planet = self.planets
+            .values()
+            .find(|planet| cursor_position.distance_to(planet.position()) < 20_f64)
+            .map(|planet| planet.id());
+    }
+
+    fn select_squad(&mut self) {
+        let Size { width, height } = self.window.size();
+        let (cursor_x, cursor_y) = self.cursor_position;
+
+        let x = cursor_x - width as f64 / 2.0;
+        let y = -cursor_y + height as f64 / 2.0;
+
+        let cursor_position = Position(x, y);
 
         self.current_selected_squad = self.squads
             .values()
-            .find(|squad| {
-                let Position(squad_x, squad_y) = squad.position();
-                let distance = ((squad_x - x).powi(2) + (squad_y - y).powi(2)).sqrt();
-
-                distance < 10_f64
-            })
+            .find(|squad| cursor_position.distance_to(squad.position()) < 10_f64)
             .map(|squad| squad.id());
     }
 
     fn get_cut_count(&self) -> Option<u64> {
-        if self.is_control_key && self.is_shift_key {
+        if self.is_modifier1 && self.is_modifier2 {
             return Some(1);
         }
 
-        if self.is_control_key {
+        if self.is_modifier1 {
             return Some(10);
         }
 
-        if self.is_shift_key {
+        if self.is_modifier2 {
             return Some(50);
         }
 
         None
+    }
+
+    fn normalize_mouse_cursor(&self, dx: f64, dy: f64) -> (f64, f64){
+        if cfg!(target_os = "macos") {
+            let Size { width, height } = self.window.size();
+            return (
+                dx - width as f64 / 2_f64,
+                dy - height as f64 / 2_f64
+            );
+        }
+
+        (dx, dy)
     }
 }
