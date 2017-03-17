@@ -8,7 +8,7 @@ use client::game_event::GameEvent;
 
 pub fn map_root_input(event: &Input) -> Option<GameEvent> {
     match *event {
-        Input::Move(Motion::MouseCursor(x, y)) => Some(GameEvent::Cursor(x, y)),
+        Input::Move(Motion::MouseRelative(x, y)) => Some(GameEvent::Cursor(x, y)),
 
         Input::Press(Button::Mouse(MouseButton::Left)) => Some(GameEvent::SelectStart),
         Input::Release(Button::Mouse(MouseButton::Left)) => Some(GameEvent::SelectEnd),

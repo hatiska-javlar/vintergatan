@@ -7,11 +7,11 @@ use std::cmp::min;
 use piston_window;
 use piston_window::{
     OpenGL,
-    PistonWindow, Window, WindowSettings, Size,
-    clear, ellipse, text, Ellipse, Transformed,
+    PistonWindow, Window, AdvancedWindow, WindowSettings, Size,
+    clear, ellipse, text, image, Ellipse, Transformed,
     Input, RenderArgs,
-    Key, MouseButton, Button, Motion,
-    G2d, G2dTexture, TextureSettings, Texture
+    Key, MouseButton, Motion,
+    G2d, G2dTexture, TextureSettings, Texture, Flip
 };
 use piston_window::texture::UpdateTexture;
 
@@ -51,7 +51,9 @@ pub struct Client {
     glyph_cache: piston_window::Glyphs,
     rx: Option<ChannelReceiver<Command>>,
 
-    cursor_position: [f64; 2],
+    cursor_position: (f64, f64),
+    cursor_icon: Texture<gfx_device_gl::Resources>,
+
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
     squads: HashMap<Id, Squad>,
@@ -80,12 +82,14 @@ impl Client {
 
         let opengl = OpenGL::V3_2;
 
-        let window: PistonWindow =
+        let mut window: PistonWindow =
             WindowSettings::new("Vintergatan game", [WIDTH, HEIGHT])
                 .opengl(opengl)
                 .exit_on_esc(true)
                 .build()
                 .unwrap();
+
+        window.set_capture_cursor(true);
 
         let window_factory = window.factory.clone();
 
@@ -115,6 +119,14 @@ impl Client {
         let font_path = current_dir().unwrap().join("assets/Exo2-Regular.ttf");
         ui.fonts.insert_from_file(&font_path).unwrap();
 
+        let cursor_icon_path = current_dir().unwrap().join("assets/cursor.png");
+        let cursor_icon = Texture::from_path(
+            &mut window.factory,
+            &cursor_icon_path,
+            Flip::None,
+            &TextureSettings::new()
+        ).unwrap();
+
         let (ui_glyph_cache, ui_text_texture_cache) = {
             const SCALE_TOLERANCE: f32 = 0.1;
             const POSITION_TOLERANCE: f32 = 0.1;
@@ -134,7 +146,9 @@ impl Client {
             glyph_cache: piston_window::Glyphs::new(&font_path, window_factory).unwrap(),
             rx: None,
 
-            cursor_position: [0f64, 0f64],
+            cursor_position: (0_f64, 0_f64),
+            cursor_icon: cursor_icon,
+
             planets: HashMap::new(),
             players: HashMap::new(),
             squads: HashMap::new(),
@@ -175,6 +189,7 @@ impl Client {
 
                 _ => {
                     self.process_input(&event);
+                    self.process_ui(event);
                 }
             }
         }
@@ -273,6 +288,9 @@ impl Client {
         let ref ui_image_map = &self.ui_image_map;
         let primitives = self.ui.draw();
 
+        let ref cursor_icon = self.cursor_icon;
+        let (cursor_x, cursor_y) = self.cursor_position;
+
         self.window.draw_2d(event, |c, gl| {
             let cache_queued_glyphs = |graphics: &mut G2d,
                                        cache: &mut G2dTexture,
@@ -301,6 +319,8 @@ impl Client {
                 cache_queued_glyphs,
                 texture_from_image
             );
+
+            image(cursor_icon, c.transform.trans(cursor_x, cursor_y), gl);
         });
     }
 
@@ -396,16 +416,24 @@ impl Client {
                         }
                     },
 
-                    GameEvent::Cursor(x, y) => {
-                        self.cursor_position = [x, y];
+                    GameEvent::Cursor(dx, dy) => {
+                        let (dx, dy) = self.normalize_mouse_cursor(dx, dy);
+                        let (cursor_x, cursor_y) = self.cursor_position;
+
+                        let x = cursor_x + dx;
+                        let y = cursor_y + dy;
+
+                        let Size { width, height } = self.window.size();
+
+                        self.cursor_position = (
+                            x.max(0_f64).min(width as f64),
+                            y.max(0_f64).min(height as f64)
+                        );
                     },
 
                     GameEvent::SelectStart => {
-                        let cursor_position = self.cursor_position;
-                        self.select_planet(cursor_position);
-                        self.select_squad(cursor_position);
-
-
+                        self.select_planet();
+                        self.select_squad();
                     },
 
                     GameEvent::SquadSpawn => {
@@ -419,12 +447,12 @@ impl Client {
 
                     GameEvent::SquadMove => {
                         if let Some(squad_id) = self.current_selected_squad {
-                            let cursor_position = self.cursor_position;
+                            let (cursor_x, cursor_y) = self.cursor_position;
 
                             let Size { width, height } = self.window.size();
 
-                            let x = cursor_position[0] - width as f64 / 2.0;
-                            let y = -cursor_position[1] + height as f64 / 2.0;
+                            let x = cursor_x - width as f64 / 2.0;
+                            let y = -cursor_y + height as f64 / 2.0;
 
                             if let Some(ref sender) = self.sender {
                                 let cut_count = self.get_cut_count();
@@ -458,6 +486,28 @@ impl Client {
         }
     }
 
+    fn process_ui(&mut self, event: Input) {
+        let Size { width, height } = self.window.size();
+        let (cursor_x, cursor_y) = self.cursor_position;
+
+        match event {
+            Input::Move(Motion::MouseRelative(_, _)) => {
+                let mouse_cursor_motion = Motion::MouseCursor(
+                    cursor_x - width as f64 / 2_f64,
+                    -cursor_y + height as f64 / 2_f64
+                );
+                let conrod_event = conrod::event::Input::Move(mouse_cursor_motion);
+                self.ui.handle_event(conrod_event);
+            },
+
+            _ => {
+                if let Some(e) = conrod::backend::piston::event::convert(event, width as f64, height as f64) {
+                    self.ui.handle_event(e);
+                }
+            }
+        }
+    }
+
     fn get_input_mapping(&self) -> Vec<fn(&Input) -> Option<GameEvent>> {
         vec![
             input_mapping::map_squad_input,
@@ -466,11 +516,12 @@ impl Client {
         ]
     }
 
-    fn select_planet(&mut self, cursor: [f64; 2]) {
+    fn select_planet(&mut self) {
         let Size { width, height } = self.window.size();
+        let (cursor_x, cursor_y) = self.cursor_position;
 
-        let x = cursor[0] - width as f64 / 2.0;
-        let y = -cursor[1] + height as f64 / 2.0;
+        let x = cursor_x - width as f64 / 2.0;
+        let y = -cursor_y + height as f64 / 2.0;
 
         let cursor_position = Position(x, y);
 
@@ -480,11 +531,12 @@ impl Client {
             .map(|planet| planet.id());
     }
 
-    fn select_squad(&mut self, cursor: [f64; 2]) {
+    fn select_squad(&mut self) {
         let Size { width, height } = self.window.size();
+        let (cursor_x, cursor_y) = self.cursor_position;
 
-        let x = cursor[0] - width as f64 / 2.0;
-        let y = -cursor[1] + height as f64 / 2.0;
+        let x = cursor_x - width as f64 / 2.0;
+        let y = -cursor_y + height as f64 / 2.0;
 
         let cursor_position = Position(x, y);
 
@@ -508,5 +560,17 @@ impl Client {
         }
 
         None
+    }
+
+    fn normalize_mouse_cursor(&self, dx: f64, dy: f64) -> (f64, f64){
+        if cfg!(target_os = "macos") {
+            let Size { width, height } = self.window.size();
+            return (
+                dx - width as f64 / 2_f64,
+                dy - height as f64 / 2_f64
+            );
+        }
+
+        (dx, dy)
     }
 }
