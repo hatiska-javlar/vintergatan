@@ -13,6 +13,7 @@ ws = "0.5.3"
 rand = "0.3.14"
 rustc-serialize = "0.3.16"
 gfx_device_gl = "0.13.0"
+vecmath = "0.3.0"
 
 [dependencies.conrod]
 version = "0.51.0"

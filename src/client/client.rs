@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::env::current_dir;
 use std::time::Duration;
 use std::cmp::min;
+use vecmath;
 
 use piston_window;
 use piston_window::{
@@ -11,9 +12,11 @@ use piston_window::{
     clear, ellipse, text, image, Ellipse, Transformed,
     Input, RenderArgs,
     Key, MouseButton, Motion,
-    G2d, G2dTexture, TextureSettings, Texture, Flip
+    G2d, G2dTexture, TextureSettings, Texture, Flip,
+    math
 };
 use piston_window::texture::UpdateTexture;
+use piston_window::math::{Matrix2d, Vec2d};
 
 use conrod;
 use gfx_device_gl;
@@ -46,6 +49,32 @@ widget_ids! {
     }
 }
 
+fn make_basic_transform(transform: &Matrix2d, viewport: Vec2d, camera: &Camera) -> Matrix2d {
+    transform
+        .trans(viewport[0] / 2_f64, viewport[1] / 2_f64)
+        .flip_v()
+        .zoom(camera.zoom)
+        .rot_rad(camera.angle)
+        .trans(-camera.x, -camera.y)
+}
+
+fn unproject(cursor: (f64, f64), viewport: Vec2d, camera: &Camera) -> (f64, f64) {
+    let identity = math::identity::<f64>();
+    let transform = make_basic_transform(&identity, viewport, camera);
+
+    let inv = vecmath::mat2x3_inv(transform);
+    let result = vecmath::row_mat2x3_transform_pos2(inv, [cursor.0, cursor.1]);
+
+    (result[0], result[1])
+}
+
+struct Camera {
+    x: f64,
+    y: f64,
+    zoom: f64,
+    angle: f64
+}
+
 pub struct Client {
     window: PistonWindow,
     glyph_cache: piston_window::Glyphs,
@@ -70,7 +99,10 @@ pub struct Client {
     ui_ids: UiIds,
     ui_image_map: conrod::image::Map<Texture<gfx_device_gl::Resources>>,
     ui_glyph_cache: conrod::text::GlyphCache,
-    ui_text_texture_cache: Texture<gfx_device_gl::Resources>
+    ui_text_texture_cache: Texture<gfx_device_gl::Resources>,
+
+    viewport: [f64; 2],
+    camera: Camera
 }
 
 impl Client {
@@ -146,7 +178,7 @@ impl Client {
             glyph_cache: piston_window::Glyphs::new(&font_path, window_factory).unwrap(),
             rx: None,
 
-            cursor_position: (0_f64, 0_f64),
+            cursor_position: (WIDTH as f64 / 2_f64, HEIGHT as f64 / 2_f64),
             cursor_icon: cursor_icon,
 
             planets: HashMap::new(),
@@ -165,7 +197,10 @@ impl Client {
             ui_ids: ui_ids,
             ui_image_map: conrod::image::Map::new(),
             ui_glyph_cache: ui_glyph_cache,
-            ui_text_texture_cache: ui_text_texture_cache
+            ui_text_texture_cache: ui_text_texture_cache,
+
+            viewport: [WIDTH as f64, HEIGHT as f64],
+            camera: Camera { x: 0_f64, y: 0_f64, zoom: 1_f64, angle: 0_f64 }
         }
     }
 
@@ -185,6 +220,7 @@ impl Client {
                 Input::Update(_) => {
                     self.update();
                     self.update_ui();
+                    self.update_viewport();
                 }
 
                 _ => {
@@ -209,8 +245,6 @@ impl Client {
         let planet_shape = ellipse::circle(0.0, 0.0, 10.0);
         let squad_shape = ellipse::circle(0.0, 0.0, 5.0);
 
-        let (center_x, center_y) = ((args.width / 2) as f64, (args.height / 2) as f64);
-
         let planets = &self.planets;
         let squads = &self.squads;
         let glyph_cache = &mut self.glyph_cache;
@@ -218,15 +252,18 @@ impl Client {
 
         let current_selected_planet = self.current_selected_planet;
         let current_selected_squad = self.current_selected_squad;
+        let viewport = self.viewport;
+        let camera = &self.camera;
 
         self.window.draw_2d(event, |c, gl| {
+            let transform = make_basic_transform(&c.transform, viewport, camera);
+
             clear(SPACE_COLOR, gl);
             for (_, planet) in planets {
                 let Position(planet_x, planet_y) = planet.position();
 
-                let planet_transform = c.transform
-                    .trans(center_x, center_y)
-                    .trans(planet_x, -planet_y);
+                let planet_transform = transform
+                    .trans(planet_x, planet_y);
 
                 let planet_color = planet.owner().map_or(PLANET_COLOR, |owner| {
                     if owner == me {
@@ -249,9 +286,8 @@ impl Client {
             for squad in squads.values() {
                 let Position(squad_x, squad_y) = squad.position();
 
-                let squad_transform = c.transform
-                    .trans(center_x, center_y)
-                    .trans(squad_x, -squad_y);
+                let squad_transform = transform
+                    .trans(squad_x, squad_y);
 
                 let squad_color = if squad.owner() == me { MY_SQUAD_COLOR } else { ENEMY_SQUAD_COLOR };
                 ellipse(squad_color, squad_shape, squad_transform, gl);
@@ -341,6 +377,45 @@ impl Client {
                     _ => { }
                 }
             };
+        }
+    }
+
+    fn update_viewport(&mut self) {
+        const EDGE_WIDTH: f64 = 30.0;
+        const MAX_SPEED: f64 = 15.0;
+        let speed_per_px = MAX_SPEED / EDGE_WIDTH;
+
+        let window_width = self.viewport[0];
+        let window_height = self.viewport[1];
+
+        let (cursor_position_x, cursor_position_y) = self.cursor_position;
+
+        if cursor_position_x >= (window_width - EDGE_WIDTH) {
+            let mut speed = MAX_SPEED - (window_width - cursor_position_x) * speed_per_px;
+            speed /= self.camera.zoom;
+            self.camera.x += speed * self.camera.angle.cos();
+            self.camera.y -= speed * self.camera.angle.sin();
+        }
+
+        if cursor_position_x <= EDGE_WIDTH {
+            let mut speed = MAX_SPEED - cursor_position_x * speed_per_px;
+            speed /= self.camera.zoom;
+            self.camera.x -= speed * self.camera.angle.cos();
+            self.camera.y += speed * self.camera.angle.sin();
+        }
+
+        if cursor_position_y >= (window_height - EDGE_WIDTH) {
+            let mut speed = MAX_SPEED - (window_height - cursor_position_y) * speed_per_px;
+            speed /= self.camera.zoom;
+            self.camera.y -= speed * self.camera.angle.cos();
+            self.camera.x -= speed * self.camera.angle.sin();
+        }
+
+        if cursor_position_y <= EDGE_WIDTH {
+            let mut speed = MAX_SPEED - cursor_position_y * speed_per_px;
+            speed /= self.camera.zoom;
+            self.camera.y += speed * self.camera.angle.cos();
+            self.camera.x += speed * self.camera.angle.sin();
         }
     }
 
@@ -447,12 +522,7 @@ impl Client {
 
                     GameEvent::SquadMove => {
                         if let Some(squad_id) = self.current_selected_squad {
-                            let (cursor_x, cursor_y) = self.cursor_position;
-
-                            let Size { width, height } = self.window.size();
-
-                            let x = cursor_x - width as f64 / 2.0;
-                            let y = -cursor_y + height as f64 / 2.0;
+                            let (x, y) = unproject(self.cursor_position, self.viewport, &self.camera);
 
                             if let Some(ref sender) = self.sender {
                                 let cut_count = self.get_cut_count();
@@ -477,6 +547,24 @@ impl Client {
                     GameEvent::Modifier2End => {
                         self.is_modifier2 = false;
                     },
+
+                    GameEvent::ZoomIn => {
+                        self.camera.zoom += 0.1_f64;
+                        if self.camera.zoom > 2_f64 {
+                            self.camera.zoom = 2_f64;
+                        }
+                    }
+
+                    GameEvent::ZoomOut => {
+                        self.camera.zoom -= 0.1_f64;
+                        if self.camera.zoom < 0.1_f64 {
+                            self.camera.zoom = 0.1_f64;
+                        }
+                    }
+
+                    GameEvent::Resize(width, height) => {
+                        self.viewport = [width as f64, height as f64];
+                    }
 
                     _ => { }
                 }
@@ -518,11 +606,8 @@ impl Client {
 
     fn select_planet(&mut self) {
         let Size { width, height } = self.window.size();
-        let (cursor_x, cursor_y) = self.cursor_position;
 
-        let x = cursor_x - width as f64 / 2.0;
-        let y = -cursor_y + height as f64 / 2.0;
-
+        let (x, y) = unproject(self.cursor_position, self.viewport, &self.camera);
         let cursor_position = Position(x, y);
 
         self.current_selected_planet = self.planets
@@ -533,11 +618,8 @@ impl Client {
 
     fn select_squad(&mut self) {
         let Size { width, height } = self.window.size();
-        let (cursor_x, cursor_y) = self.cursor_position;
 
-        let x = cursor_x - width as f64 / 2.0;
-        let y = -cursor_y + height as f64 / 2.0;
-
+        let (x, y) = unproject(self.cursor_position, self.viewport, &self.camera);
         let cursor_position = Position(x, y);
 
         self.current_selected_squad = self.squads
