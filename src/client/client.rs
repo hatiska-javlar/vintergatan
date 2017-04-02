@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::cmp::min;
 use vecmath;
 
+use fps_counter::FPSCounter;
 use piston_window;
 use piston_window::{
     OpenGL,
@@ -45,6 +46,7 @@ widget_ids! {
 
         gold,
         planets,
+        fps,
         players[]
     }
 }
@@ -102,7 +104,10 @@ pub struct Client {
     ui_text_texture_cache: Texture<gfx_device_gl::Resources>,
 
     viewport: [f64; 2],
-    camera: Camera
+    camera: Camera,
+
+    fps: usize,
+    fps_counter: FPSCounter
 }
 
 impl Client {
@@ -200,7 +205,10 @@ impl Client {
             ui_text_texture_cache: ui_text_texture_cache,
 
             viewport: [WIDTH as f64, HEIGHT as f64],
-            camera: Camera { x: 0_f64, y: 0_f64, zoom: 1_f64, angle: 0_f64 }
+            camera: Camera { x: 0_f64, y: 0_f64, zoom: 1_f64, angle: 0_f64 },
+
+            fps: 0,
+            fps_counter: FPSCounter::new()
         }
     }
 
@@ -316,6 +324,8 @@ impl Client {
                 );
             }
         });
+
+        self.fps = self.fps_counter.tick();
     }
 
     fn render_ui(&mut self, event: &Input) {
@@ -464,6 +474,11 @@ impl Client {
             .color(color::LIGHT_BLUE)
             .mid_left_of(self.ui_ids.header_items[1])
             .set(self.ui_ids.planets, &mut ui);
+
+        widget::Text::new(&format!("FPS: {}", self.fps))
+            .color(color::LIGHT_BLUE)
+            .mid_left_of(self.ui_ids.header_items[2])
+            .set(self.ui_ids.fps, &mut ui);
 
         let mut players_state = self.players.values()
             .map(|player| format!("{}: {}", player.name(), player.state()))
