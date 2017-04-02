@@ -21,6 +21,11 @@ pub fn map_root_input(event: &Input) -> Option<GameEvent> {
         Input::Press(Button::Keyboard(Key::LShift)) => Some(GameEvent::Modifier2Start),
         Input::Release(Button::Keyboard(Key::LShift)) => Some(GameEvent::Modifier2End),
 
+        Input::Press(Button::Keyboard(Key::Z)) => Some(GameEvent::ZoomOut),
+        Input::Press(Button::Keyboard(Key::X)) => Some(GameEvent::ZoomIn),
+
+        Input::Resize(width, height) => Some(GameEvent::Resize(width as f64, height as f64)),
+
         _ => None
     }
 }

@@ -8,5 +8,8 @@ pub enum GameEvent {
     Modifier1Start,
     Modifier1End,
     Modifier2Start,
-    Modifier2End
+    Modifier2End,
+    ZoomIn,
+    ZoomOut,
+    Resize(f64, f64)
 }

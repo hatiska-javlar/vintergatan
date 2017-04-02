@@ -7,6 +7,7 @@ extern crate rand;
 extern crate rustc_serialize;
 #[macro_use] extern crate conrod;
 extern crate gfx_device_gl;
+extern crate vecmath;
 
 use getopts::Options;
 use std::env;
