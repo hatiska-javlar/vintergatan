@@ -1,4 +1,5 @@
 use common::PlayerId;
+use client::color::Color;
 
 pub struct Player {
     id: PlayerId,

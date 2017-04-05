@@ -25,6 +25,10 @@ pub enum Command {
 
     Disconnect {
         sender: Sender
+    },
+
+    SetState {
+        state: String
     }
 }
 
@@ -37,15 +41,29 @@ impl ToCommand for Command {
         let raw = message.as_text()
             .map_err(ParseCommandError::BrokenCommand)?;
 
-        let (planets, players, squads, me, gold) = json::parse_process_command(raw)?;
+        let (action, data) = json::parse_command(raw)?;
 
-        let command = Command::Process {
-            sender: sender,
-            planets: planets,
-            players: players,
-            squads: squads,
-            gold: gold,
-            me: me
+        let command = match action.as_ref() {
+            "set_state" => {
+                let state = json::parse_state_data(&data)?;
+
+                Command::SetState { state: state }
+            },
+
+            "render" => {
+                let (planets, players, squads, me, gold) = json::parse_process_command_data(&data)?;
+
+                Command::Process {
+                    sender: sender,
+                    planets: planets,
+                    players: players,
+                    squads: squads,
+                    gold: gold,
+                    me: me
+                }
+            },
+
+            _ => return Err(ParseCommandError::UnsupportedAction)
         };
 
         Ok(command)

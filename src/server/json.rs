@@ -40,7 +40,7 @@ pub fn format_process_command(
     squads_json: &String
 ) -> String {
     format!(
-        r#"{{"planets":{},"players":{},"squads":{},"id":{},"gold":{}}}"#,
+        r#"{{"action":"render","data":{{"planets":{},"players":{},"squads":{},"id":{},"gold":{}}}}}"#,
         planets_json,
         players_json,
         squads_json,
@@ -85,6 +85,13 @@ pub fn format_players(players: &HashMap<PlayerId, Player>) -> String {
         .collect::<Vec<String>>();
 
     format!("[{}]", utils::join(formatted_players, ","))
+}
+
+pub fn format_state(player: &Player) -> String {
+    format!(
+        r#"{{"action":"set_state","data":{{"state":"{}"}}}}"#,
+        format_player_state(player)
+    )
 }
 
 fn format_player_state(player: &Player) -> String {

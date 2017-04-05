@@ -18,19 +18,32 @@ type ProcessCommandTuple = (
     f64
 );
 
-pub fn parse_process_command(string: &str) -> Result<ProcessCommandTuple> {
+pub fn parse_command(string: &str) -> Result<(String, Object)> {
     let json = json::parse_json(string)?;
     let params = json::parse_json_as_object(&json)?;
 
+    let command = json::parse_string_from_json_object(params, "action")?;
+    let data = json::parse_object_from_json_object(params, "data")?;
+
+    return Ok((command.to_string(), data.to_owned()));
+}
+
+pub fn parse_process_command_data(data: &Object) -> Result<ProcessCommandTuple> {
     let process_command_tuple = (
-        parse_planets(params)?,
-        parse_players(params)?,
-        parse_squads(params)?,
-        json::parse_player_id_from_json_object(params, "id")?,
-        json::parse_f64_from_json_object(params, "gold")?
+        parse_planets(data)?,
+        parse_players(data)?,
+        parse_squads(data)?,
+        json::parse_player_id_from_json_object(data, "id")?,
+        json::parse_f64_from_json_object(data, "gold")?
     );
 
     return Ok(process_command_tuple);
+}
+
+pub fn parse_state_data(data: &Object) -> Result<String> {
+    let state = json::parse_string_from_json_object(data, "state")?;
+
+    return Ok(state.to_string());
 }
 
 pub fn format_ready_command() -> String {

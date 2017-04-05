@@ -6,6 +6,7 @@ mod json;
 mod planet;
 mod player;
 mod squad;
+mod color;
 
 use client::client::Client;
 

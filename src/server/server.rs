@@ -196,11 +196,7 @@ impl Server {
                     .all(|player| player.is_ready());
 
                 if is_all_ready {
-                    self.state = ServerState::Playing;
-
-                    for player in self.players.values_mut() {
-                        player.set_playing_state();
-                    }
+                    self.set_playing_state()
                 }
             },
 
@@ -222,6 +218,15 @@ impl Server {
         match self.state {
             ServerState::Playing => true,
             _ => false
+        }
+    }
+
+    fn set_playing_state(&mut self) {
+        self.state = ServerState::Playing;
+
+        for player in self.players.values_mut() {
+            player.set_playing_state();
+            player.send(json::format_state(player));
         }
     }
 

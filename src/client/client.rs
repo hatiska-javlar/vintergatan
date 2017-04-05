@@ -30,6 +30,7 @@ use client::player::Player;
 use client::squad::Squad;
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
+use client::color;
 
 widget_ids! {
     pub struct UiIds {
@@ -70,7 +71,9 @@ pub struct Client {
     ui_ids: UiIds,
     ui_image_map: conrod::image::Map<Texture<gfx_device_gl::Resources>>,
     ui_glyph_cache: conrod::text::GlyphCache,
-    ui_text_texture_cache: Texture<gfx_device_gl::Resources>
+    ui_text_texture_cache: Texture<gfx_device_gl::Resources>,
+
+    player_id_to_color: HashMap<PlayerId, color::Color>
 }
 
 impl Client {
@@ -141,6 +144,8 @@ impl Client {
 
         let ui_ids = UiIds::new(ui.widget_id_generator());
 
+        // thread_rng().shuffle(&mut players_colors);
+
         Client {
             window: window,
             glyph_cache: piston_window::Glyphs::new(&font_path, window_factory).unwrap(),
@@ -165,7 +170,9 @@ impl Client {
             ui_ids: ui_ids,
             ui_image_map: conrod::image::Map::new(),
             ui_glyph_cache: ui_glyph_cache,
-            ui_text_texture_cache: ui_text_texture_cache
+            ui_text_texture_cache: ui_text_texture_cache,
+
+            player_id_to_color: HashMap::new()
         }
     }
 
@@ -219,6 +226,8 @@ impl Client {
         let current_selected_planet = self.current_selected_planet;
         let current_selected_squad = self.current_selected_squad;
 
+        let ref player_id_to_color = self.player_id_to_color;
+
         self.window.draw_2d(event, |c, gl| {
             clear(SPACE_COLOR, gl);
             for (_, planet) in planets {
@@ -228,15 +237,11 @@ impl Client {
                     .trans(center_x, center_y)
                     .trans(planet_x, -planet_y);
 
-                let planet_color = planet.owner().map_or(PLANET_COLOR, |owner| {
-                    if owner == me {
-                        MY_PLANET_COLOR
-                    } else {
-                        ENEMY_PLANET_COLOR
-                    }
+                let planet_color = planet.owner().map_or(color::Color::NEUTRAL, |owner| {
+                    player_id_to_color.get(&owner).map_or(color::Color::NEUTRAL, |player_color| player_color.clone())
                 });
 
-                ellipse(planet_color, planet_shape, planet_transform, gl);
+                ellipse(color::ColorScheme::get_color(planet_color), planet_shape, planet_transform, gl);
 
                 if let Some(current_selected_planet) = current_selected_planet {
                     if planet.id() == current_selected_planet {
@@ -331,13 +336,33 @@ impl Client {
                     Command::Connect { sender } => {
                         self.sender = Some(sender);
                     }
+
                     Command::Process { sender, planets, players, squads, gold, me } => {
                         self.planets = planets;
                         self.players = players;
                         self.squads = squads;
                         self.gold = gold;
                         self.me = me;
-                    },
+                    }
+
+                    Command::SetState { state } => {
+                        match state.as_ref() {
+                            "playing" => {
+                                let color_scheme = color::ColorScheme::new();
+                                let players_colors = color_scheme.players_colors.clone();
+
+                                let players = self.players.values();
+                                let ref mut player_id_to_color = self.player_id_to_color;
+
+                                for (index, player) in players.enumerate() {
+                                    player_id_to_color.insert(player.id(), players_colors[index].clone());
+                                }
+                            }
+
+                            _ => { }
+                        }
+                    }
+
                     _ => { }
                 }
             };
