@@ -1,46 +1,69 @@
-use piston_window::Button;
-use piston_window::Input;
-use piston_window::Key;
-use piston_window::Motion;
-use piston_window::MouseButton;
+use glium::glutin::{WindowEvent, ElementState, MouseButton, KeyboardInput, VirtualKeyCode};
 
 use client::game_event::GameEvent;
 
-pub fn map_root_input(event: &Input) -> Option<GameEvent> {
+pub fn map_root_input(event: &WindowEvent) -> Option<GameEvent> {
     match *event {
-        Input::Move(Motion::MouseRelative(x, y)) => Some(GameEvent::Cursor(x, y)),
+        WindowEvent::MouseMoved { position, .. } => Some(GameEvent::Cursor(position.0, position.1)),
 
-        Input::Press(Button::Mouse(MouseButton::Left)) => Some(GameEvent::SelectStart),
-        Input::Release(Button::Mouse(MouseButton::Left)) => Some(GameEvent::SelectEnd),
+        WindowEvent::MouseInput { button: MouseButton::Left, state: ElementState::Pressed, .. } => Some(GameEvent::SelectStart),
+            WindowEvent::MouseInput { button: MouseButton::Left, state: ElementState::Released, .. } => Some(GameEvent::SelectEnd),
 
-        Input::Press(Button::Keyboard(Key::Space)) => Some(GameEvent::ReadyToPlay),
+        WindowEvent::KeyboardInput {
+            input: KeyboardInput {
+                state: ElementState::Released,
+                virtual_keycode: Some(VirtualKeyCode::Space),
+                ..
+            },
+            ..
+        } => Some(GameEvent::ReadyToPlay),
 
-        Input::Press(Button::Keyboard(Key::LCtrl)) => Some(GameEvent::Modifier1Start),
-        Input::Release(Button::Keyboard(Key::LCtrl)) => Some(GameEvent::Modifier1End),
+        WindowEvent::KeyboardInput {
+            input: KeyboardInput {
+                state: ElementState::Released,
+                virtual_keycode: Some(VirtualKeyCode::Z),
+                ..
+            },
+            ..
+        } => Some(GameEvent::ZoomIn),
 
-        Input::Press(Button::Keyboard(Key::LShift)) => Some(GameEvent::Modifier2Start),
-        Input::Release(Button::Keyboard(Key::LShift)) => Some(GameEvent::Modifier2End),
+        WindowEvent::KeyboardInput {
+            input: KeyboardInput {
+                state: ElementState::Released,
+                virtual_keycode: Some(VirtualKeyCode::X),
+                ..
+            },
+            ..
+        } => Some(GameEvent::ZoomOut),
 
-        Input::Press(Button::Keyboard(Key::Z)) => Some(GameEvent::ZoomOut),
-        Input::Press(Button::Keyboard(Key::X)) => Some(GameEvent::ZoomIn),
-
-        Input::Resize(width, height) => Some(GameEvent::Resize(width as f64, height as f64)),
+        WindowEvent::Resized(width, height) => Some(GameEvent::Resize(width as f64, height as f64)),
 
         _ => None
     }
 }
 
-pub fn map_planet_input(event: &Input) -> Option<GameEvent> {
+pub fn map_planet_input(event: &WindowEvent) -> Option<GameEvent> {
     match *event {
-        Input::Press(Button::Keyboard(Key::S)) => Some(GameEvent::SquadSpawn),
+        WindowEvent::KeyboardInput {
+            input: KeyboardInput {
+                state: ElementState::Released,
+                virtual_keycode: Some(VirtualKeyCode::S),
+                ..
+            },
+            ..
+        } => Some(GameEvent::SquadSpawn),
 
         _ => None
     }
 }
 
-pub fn map_squad_input(event: &Input) -> Option<GameEvent> {
+pub fn map_squad_input(event: &WindowEvent) -> Option<GameEvent> {
     match *event {
-        Input::Press(Button::Mouse(MouseButton::Right)) => Some(GameEvent::SquadMove),
+        WindowEvent::MouseInput {
+            button: MouseButton::Right,
+            state: ElementState::Released,
+            ..
+        } => Some(GameEvent::SquadMove),
 
         _ => None
     }

@@ -6,21 +6,12 @@ use std::cmp::min;
 use vecmath;
 
 use fps_counter::FPSCounter;
-use piston_window;
-use piston_window::{
-    OpenGL,
-    PistonWindow, Window, AdvancedWindow, WindowSettings, Size,
-    clear, ellipse, text, image, Ellipse, Transformed,
-    Input, RenderArgs,
-    Key, MouseButton, Motion,
-    G2d, G2dTexture, TextureSettings, Texture, Flip,
-    math
-};
-use piston_window::texture::UpdateTexture;
-use piston_window::math::{Matrix2d, Vec2d};
 
 use conrod;
-use gfx_device_gl;
+use conrod::backend::glium::glium;
+use conrod::backend::glium::glium::Surface;
+use image;
+use glium_text_rusttype as glium_text;
 
 use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
@@ -34,6 +25,21 @@ use client::player::Player;
 use client::squad::Squad;
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
+
+#[derive(Copy, Clone)]
+struct Vertex {
+    position: [f32; 2],
+}
+
+implement_vertex!(Vertex, position);
+
+#[derive(Copy, Clone)]
+struct TextureVertex {
+    position: [f32; 2],
+    tex_coords: [f32; 2]
+}
+
+implement_vertex!(TextureVertex, position, tex_coords);
 
 widget_ids! {
     pub struct UiIds {
@@ -51,21 +57,28 @@ widget_ids! {
     }
 }
 
-fn make_basic_transform(transform: &Matrix2d, viewport: Vec2d, camera: &Camera) -> Matrix2d {
-    transform
-        .trans(viewport[0] / 2_f64, viewport[1] / 2_f64)
-        .flip_v()
-        .zoom(camera.zoom)
-        .rot_rad(camera.angle)
-        .trans(-camera.x, -camera.y)
+fn get_ndc(window_coordinates: (f64, f64), viewport: [f64; 2]) -> [f32; 4] {
+    let (x, y) = window_coordinates;
+
+    let width = viewport[0];
+    let height = viewport[1];
+
+    [
+         (x as f32) * 2.0 / (width as f32) - 1.0,
+        -(y as f32) * 2.0 / (height as f32) + 1.0,
+        -1.0,
+         1.0
+    ]
 }
 
-fn unproject(cursor: (f64, f64), viewport: Vec2d, camera: &Camera) -> (f64, f64) {
-    let identity = math::identity::<f64>();
-    let transform = make_basic_transform(&identity, viewport, camera);
+fn unproject(window_coordinates: (f64, f64), pm: [[f32; 4]; 4], viewport: [f64; 2], camera: &Camera) -> (f32, f32) {
+    let inv = vecmath::mat4_inv(pm);
 
-    let inv = vecmath::mat2x3_inv(transform);
-    let result = vecmath::row_mat2x3_transform_pos2(inv, [cursor.0, cursor.1]);
+    let mut ndc = get_ndc(window_coordinates, viewport);
+    ndc[0] -= camera.x as f32;
+    ndc[1] -= camera.y as f32;
+
+    let result = vecmath::row_mat4_transform(inv, ndc);
 
     (result[0], result[1])
 }
@@ -74,16 +87,31 @@ struct Camera {
     x: f64,
     y: f64,
     zoom: f64,
-    angle: f64
+    angle: f64,
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+    near: f32,
+    far: f32
 }
 
 pub struct Client {
-    window: PistonWindow,
-    glyph_cache: piston_window::Glyphs,
+    events_loop: glium::glutin::EventsLoop,
+    display: glium::Display,
+
+    text_system: glium_text::TextSystem,
+    font: glium_text::FontTexture,
+
+    shape: Vec<Vertex>,
+    program: glium::Program,
+    texture_program: glium::Program,
+
     rx: Option<ChannelReceiver<Command>>,
 
     cursor_position: (f64, f64),
-    cursor_icon: Texture<gfx_device_gl::Resources>,
+    cursor_shape: Vec<TextureVertex>,
+    cursor_texture: glium::texture::SrgbTexture2d,
 
     planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
@@ -99,9 +127,8 @@ pub struct Client {
 
     ui: conrod::Ui,
     ui_ids: UiIds,
-    ui_image_map: conrod::image::Map<Texture<gfx_device_gl::Resources>>,
-    ui_glyph_cache: conrod::text::GlyphCache,
-    ui_text_texture_cache: Texture<gfx_device_gl::Resources>,
+    ui_image_map: conrod::image::Map<glium::texture::Texture2d>,
+    ui_renderer: conrod::backend::glium::Renderer,
 
     viewport: [f64; 2],
     camera: Camera,
@@ -117,18 +144,112 @@ impl Client {
         const WIDTH: u32 = 1280;
         const HEIGHT: u32 = 800;
 
-        let opengl = OpenGL::V3_2;
+        let events_loop = glium::glutin::EventsLoop::new();
 
-        let mut window: PistonWindow =
-            WindowSettings::new("Vintergatan game", [WIDTH, HEIGHT])
-                .opengl(opengl)
-                .exit_on_esc(true)
-                .build()
-                .unwrap();
+        let window = glium::glutin::WindowBuilder::new()
+            .with_dimensions(WIDTH, HEIGHT)
+            .with_title("Vintergatan game on glium");
 
-        window.set_capture_cursor(true);
+        let context = glium::glutin::ContextBuilder::new()
+            .with_vsync(true)
+            .with_multisampling(4);
 
-        let window_factory = window.factory.clone();
+        let display = glium::Display::new(window, context, &events_loop).unwrap();
+
+        display.gl_window().set_cursor_state(glium::glutin::CursorState::Grab);
+        display.gl_window().set_cursor(glium::glutin::MouseCursor::NoneCursor);
+
+        let text_system = glium_text::TextSystem::new(&display);
+        let font = glium_text::FontTexture::new(
+            &display,
+            &include_bytes!("../../assets/Exo2-Regular.ttf")[..],
+            32,
+            glium_text::FontTexture::ascii_character_list()
+        ).unwrap();
+
+        let sectors_count = 128_u32;
+        let mut shape = (0..(sectors_count + 1))
+            .map(|sector| (sector as f32) * 2_f32 * ::std::f32::consts::PI / (sectors_count as f32))
+            .map(|angle| Vertex { position: [angle.cos(), angle.sin()] })
+            .collect::<Vec<_>>();
+
+        shape.insert(0, Vertex { position: [0_f32, 0_f32] });
+
+        let program = program!(&display,
+            140 => {
+                vertex: r#"
+                    #version 140
+
+                    in vec2 position;
+                    out vec4 v_color;
+
+                    uniform mat4 matrix;
+                    uniform mat4 view;
+                    uniform vec4 color;
+
+                    void main() {
+                        v_color = color;
+                        gl_Position = view * matrix * vec4(position, 0.0, 1.0);
+                    }
+                "#,
+                outputs_srgb: true,
+                fragment: r#"
+                    #version 140
+
+                    in vec4 v_color;
+                    out vec4 color;
+
+                    void main() {
+                        color = v_color;
+                    }
+                "#,
+            },
+        ).unwrap();
+
+        let cursor_shape = vec![
+            TextureVertex { position: [-1.0, -1.0], tex_coords: [0.0, 0.0] }, // 1
+            TextureVertex { position: [-1.0,  1.0], tex_coords: [0.0, 1.0] }, // 2
+            TextureVertex { position: [ 1.0,  1.0], tex_coords: [1.0, 1.0] }, // 3
+            TextureVertex { position: [ 1.0,  1.0], tex_coords: [1.0, 1.0] }, // 3
+            TextureVertex { position: [ 1.0, -1.0], tex_coords: [1.0, 0.0] }, // 4
+            TextureVertex { position: [-1.0, -1.0], tex_coords: [0.0, 0.0] }, // 1
+        ];
+
+        let texture_vertex_shader_src = r#"
+            #version 140
+
+            in vec2 position;
+            in vec2 tex_coords;
+            out vec2 v_tex_coords;
+
+            uniform mat4 matrix;
+
+            void main() {
+                v_tex_coords = tex_coords;
+                gl_Position = matrix * vec4(position, 0.0, 1.0);
+            }
+        "#;
+
+        let texture_fragment_shader_src = r#"
+            #version 140
+
+            in vec2 v_tex_coords;
+            out vec4 color;
+
+            uniform sampler2D tex;
+
+            void main() {
+                color = texture(tex, v_tex_coords);
+            }
+        "#;
+
+        let texture_program = glium::Program::from_source(&display, texture_vertex_shader_src, texture_fragment_shader_src, None).unwrap();
+
+        let cursor_image = image::load(::std::io::Cursor::new(&include_bytes!("../../assets/cursor.png")[..]), image::PNG).unwrap().to_rgba();
+        let cursor_image_dimensions = cursor_image.dimensions();
+        let cursor_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&cursor_image.into_raw(), cursor_image_dimensions);
+
+        let cursor_texture = glium::texture::SrgbTexture2d::new(&display, cursor_image).unwrap();
 
         let theme = conrod::Theme {
             name: "Vintergatan theme".to_string(),
@@ -144,7 +265,7 @@ impl Client {
             font_size_large: 18,
             font_size_medium: 14,
             font_size_small: 12,
-            widget_styling: HashMap::new(),
+            widget_styling: conrod::theme::StyleMap::default(),
             mouse_drag_threshold: 0.0,
             double_click_threshold: Duration::from_millis(500),
         };
@@ -156,35 +277,26 @@ impl Client {
         let font_path = current_dir().unwrap().join("assets/Exo2-Regular.ttf");
         ui.fonts.insert_from_file(&font_path).unwrap();
 
-        let cursor_icon_path = current_dir().unwrap().join("assets/cursor.png");
-        let cursor_icon = Texture::from_path(
-            &mut window.factory,
-            &cursor_icon_path,
-            Flip::None,
-            &TextureSettings::new()
-        ).unwrap();
-
-        let (ui_glyph_cache, ui_text_texture_cache) = {
-            const SCALE_TOLERANCE: f32 = 0.1;
-            const POSITION_TOLERANCE: f32 = 0.1;
-            let cache = conrod::text::GlyphCache::new(WIDTH, HEIGHT, SCALE_TOLERANCE, POSITION_TOLERANCE);
-            let buffer_len = WIDTH as usize * HEIGHT as usize;
-            let init = vec![128; buffer_len];
-            let settings = TextureSettings::new();
-            let factory = &mut window.factory.clone();
-            let texture = G2dTexture::from_memory_alpha(factory, &init, WIDTH, HEIGHT, &settings).unwrap();
-            (cache, texture)
-        };
-
         let ui_ids = UiIds::new(ui.widget_id_generator());
 
+        let ui_renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
+
         Client {
-            window: window,
-            glyph_cache: piston_window::Glyphs::new(&font_path, window_factory).unwrap(),
+            events_loop,
+            display,
+
+            text_system,
+            font,
+
+            shape,
+            program,
+            texture_program,
+
             rx: None,
 
             cursor_position: (WIDTH as f64 / 2_f64, HEIGHT as f64 / 2_f64),
-            cursor_icon: cursor_icon,
+            cursor_shape,
+            cursor_texture,
 
             planets: HashMap::new(),
             players: HashMap::new(),
@@ -201,11 +313,21 @@ impl Client {
             ui: ui,
             ui_ids: ui_ids,
             ui_image_map: conrod::image::Map::new(),
-            ui_glyph_cache: ui_glyph_cache,
-            ui_text_texture_cache: ui_text_texture_cache,
+            ui_renderer,
 
             viewport: [WIDTH as f64, HEIGHT as f64],
-            camera: Camera { x: 0_f64, y: 0_f64, zoom: 1_f64, angle: 0_f64 },
+            camera: Camera {
+                x: 0_f64,
+                y: 0_f64,
+                zoom: 1_f64,
+                angle: 0_f64,
+                left: -500.0,
+                right: 500.0,
+                top: 500.0,
+                bottom: -500.0,
+                near: 10.0,
+                far: 100.0
+            },
 
             fps: 0,
             fps_counter: FPSCounter::new()
@@ -218,29 +340,38 @@ impl Client {
         self.rx = Some(rx);
         thread::spawn(move || connect(format!("ws://{}", address), |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
-        while let Some(event) = self.window.next() {
-            match event {
-                Input::Render(args) => {
-                    self.render(&args, &event);
-                    self.render_ui(&event);
-                }
+        'main: loop {
+            let mut events = Vec::new();
+            self.events_loop.poll_events(|ev| events.push(ev));
 
-                Input::Update(_) => {
-                    self.update();
-                    self.update_ui();
-                    self.update_viewport();
-                }
-
-                _ => {
-                    self.process_input(&event);
-                    self.process_ui(event);
+            for ev in events {
+                match ev {
+                    glium::glutin::Event::WindowEvent { event, .. } => {
+                        match event {
+                            glium::glutin::WindowEvent::Closed => break 'main,
+                            _ => {
+                                self.process_input(&event);
+                                self.process_ui(event);
+                            }
+                        }
+                    }
+                    _ => ()
                 }
             }
+
+            self.render();
+
+            self.update();
+            self.update_ui();
+            self.update_viewport();
+
+            thread::sleep(Duration::from_millis(40));
         }
     }
 
-    fn render(&mut self, args: &RenderArgs, event: &Input) {
-        const SPACE_COLOR:[f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
+    fn render(&mut self) {
+        const SPACE_COLOR: [f32; 4] = [0.015686275, 0.129411765, 0.250980392, 1.0];
+
         const SELECTION_COLOR:[f32; 4] = [0.0, 1.0, 0.0, 0.2];
         const PLANET_COLOR:[f32; 4] = [0.125490196, 0.752941176, 0.870588235, 1.0];
         const MY_PLANET_COLOR: [f32; 4] = [0.87843137, 0.50588235, 0.35686275, 1.0];
@@ -250,124 +381,146 @@ impl Client {
         const MY_TEXT_COLOR: [f32; 4] = [0.0, 1.0, 0.0, 0.2];
         const ENEMY_TEXT_COLOR: [f32; 4] = [0.87843137, 0.22352941, 0.35686275, 1.0];
 
-        let planet_shape = ellipse::circle(0.0, 0.0, 10.0);
-        let squad_shape = ellipse::circle(0.0, 0.0, 5.0);
+        let mut frame = self.display.draw();
+        frame.clear_color_srgb(SPACE_COLOR[0], SPACE_COLOR[1], SPACE_COLOR[2], SPACE_COLOR[3]);
 
-        let planets = &self.planets;
-        let squads = &self.squads;
-        let glyph_cache = &mut self.glyph_cache;
+        let vertex_buffer = glium::VertexBuffer::new(&self.display, &self.shape).unwrap();
+        let indices = glium::index::NoIndices(glium::index::PrimitiveType::TriangleFan);
+
+        let view = self.view_matrix();
+
+        let params = glium::DrawParameters {
+            blend: glium::draw_parameters::Blend::alpha_blending(),
+            .. Default::default()
+        };
+
         let me = self.me;
 
         let current_selected_planet = self.current_selected_planet;
         let current_selected_squad = self.current_selected_squad;
-        let viewport = self.viewport;
-        let camera = &self.camera;
 
-        self.window.draw_2d(event, |c, gl| {
-            let transform = make_basic_transform(&c.transform, viewport, camera);
+        for planet in self.planets.values() {
+            let Position(planet_x, planet_y) = planet.position();
 
-            clear(SPACE_COLOR, gl);
-            for (_, planet) in planets {
-                let Position(planet_x, planet_y) = planet.position();
-
-                let planet_transform = transform
-                    .trans(planet_x, planet_y);
-
-                let planet_color = planet.owner().map_or(PLANET_COLOR, |owner| {
-                    if owner == me {
-                        MY_PLANET_COLOR
-                    } else {
-                        ENEMY_PLANET_COLOR
-                    }
-                });
-
-                ellipse(planet_color, planet_shape, planet_transform, gl);
-
-                if let Some(current_selected_planet) = current_selected_planet {
-                    if planet.id() == current_selected_planet {
-                        Ellipse::new_border(SELECTION_COLOR, 1.0)
-                            .draw([-18.0, -18.0, 36.0, 36.0], &c.draw_state, planet_transform, gl);
-                    }
-                }
-            }
-
-            for squad in squads.values() {
-                let Position(squad_x, squad_y) = squad.position();
-
-                let squad_transform = transform
-                    .trans(squad_x, squad_y);
-
-                let squad_color = if squad.owner() == me { MY_SQUAD_COLOR } else { ENEMY_SQUAD_COLOR };
-                ellipse(squad_color, squad_shape, squad_transform, gl);
-
-                if let Some(current_selected_squad) = current_selected_squad {
-                    if squad.id() == current_selected_squad {
-                        Ellipse::new_border(SELECTION_COLOR, 1.0)
-                            .draw([-12.0, -12.0, 24.0, 24.0], &c.draw_state, squad_transform, gl);
-                    }
-                }
-
-                let label_transform = if squad.owner() == me {
-                    squad_transform.trans(16.0, 24.0)
+            let planet_color = planet.owner().map_or(PLANET_COLOR, |owner| {
+                if owner == me {
+                    MY_PLANET_COLOR
                 } else {
-                    squad_transform.trans(16.0, -12.0)
-                };
+                    ENEMY_PLANET_COLOR
+                }
+            });
 
-                let text_color = if squad.owner() == me { MY_TEXT_COLOR } else { ENEMY_TEXT_COLOR };
-                text(
-                    text_color,
-                    12,
-                    &format!("{}", squad.count()),
-                    glyph_cache,
-                    label_transform,
-                    gl
-                );
+            let uniforms = uniform! {
+                matrix: [
+                    [10.0, 0.0, 0.0, 0.0],
+                    [0.0, 10.0, 0.0, 0.0],
+                    [0.0, 0.0, 10.0, 0.0],
+                    [planet_x as f32, planet_y as f32, 0.0, 1.0f32],
+                ],
+                view: view,
+                color: planet_color
+            };
+
+            frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
+
+            if let Some(current_selected_planet) = current_selected_planet {
+                if planet.id() == current_selected_planet {
+                    let uniforms = uniform! {
+                        matrix: [
+                            [15.0, 0.0, 0.0, 0.0],
+                            [0.0, 15.0, 0.0, 0.0],
+                            [0.0, 0.0, 15.0, 0.0],
+                            [planet_x as f32, planet_y as f32, 0.0, 1.0f32],
+                        ],
+                        view: view,
+                        color: SELECTION_COLOR
+                    };
+
+                    frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
+                }
             }
-        });
+        }
+
+        for squad in self.squads.values() {
+            let Position(squad_x, squad_y) = squad.position();
+
+            let squad_color = if squad.owner() == me { MY_SQUAD_COLOR } else { ENEMY_SQUAD_COLOR };
+
+            let uniforms = uniform! {
+                matrix: [
+                    [5.0, 0.0, 0.0, 0.0],
+                    [0.0, 5.0, 0.0, 0.0],
+                    [0.0, 0.0, 5.0, 0.0],
+                    [squad_x as f32, squad_y as f32, 0.0, 1.0f32],
+                ],
+                view: view,
+                color: squad_color
+            };
+
+            frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
+
+
+            if let Some(current_selected_squad) = current_selected_squad {
+                if squad.id() == current_selected_squad {
+                    let uniforms = uniform! {
+                        matrix: [
+                            [8.0, 0.0, 0.0, 0.0],
+                            [0.0, 8.0, 0.0, 0.0],
+                            [0.0, 0.0, 8.0, 0.0],
+                            [squad_x as f32, squad_y as f32, 0.0, 1.0f32],
+                        ],
+                        view: view,
+                        color: SELECTION_COLOR
+                    };
+
+                    frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
+
+                }
+            }
+
+            let mut text_x = squad_x;
+            let mut text_y = squad_y;
+
+            if squad.owner() == me {
+                text_x += 16.0;
+                text_y += 12.0;
+            } else {
+                text_x += 16.0;
+                text_y -= 12.0;
+            };
+
+            let text_color = if squad.owner() == me { MY_TEXT_COLOR } else { ENEMY_TEXT_COLOR };
+            let text = glium_text::TextDisplay::new(&self.text_system, &self.font, &format!("{}", squad.count()));
+
+            let matrix = [
+                [20.0, 0.0, 0.0, 0.0],
+                [0.0, 20.0, 0.0, 0.0],
+                [0.0, 0.0, 20.0, 0.0],
+                [text_x as f32, text_y as f32, 0.0, 1.0]
+            ];
+
+            glium_text::draw(&text, &self.text_system, &mut frame, vecmath::col_mat4_mul(view, matrix), (text_color[0], text_color[1], text_color[2], text_color[3]));
+        }
+
+        {
+            let primitives = self.ui.draw();
+            self.ui_renderer.fill(&self.display, primitives, &self.ui_image_map);
+            self.ui_renderer.draw(&self.display, &mut frame, &self.ui_image_map).unwrap();
+        }
+
+        let cursor_vertex_buffer = glium::VertexBuffer::new(&self.display, &self.cursor_shape).unwrap();
+        let cursor_indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+
+        let cursor_uniform = uniform! {
+            matrix: self.cursor_matrix(),
+            tex: &self.cursor_texture
+        };
+
+        frame.draw(&cursor_vertex_buffer, &cursor_indices, &self.texture_program, &cursor_uniform, &params).unwrap();
+
+        frame.finish().unwrap();
 
         self.fps = self.fps_counter.tick();
-    }
-
-    fn render_ui(&mut self, event: &Input) {
-        let ref mut ui_text_texture_cache = &mut self.ui_text_texture_cache;
-        let ref mut ui_glyph_cache = &mut self.ui_glyph_cache;
-        let ref ui_image_map = &self.ui_image_map;
-        let primitives = self.ui.draw();
-
-        let ref cursor_icon = self.cursor_icon;
-        let (cursor_x, cursor_y) = self.cursor_position;
-
-        self.window.draw_2d(event, |c, gl| {
-            let cache_queued_glyphs = |graphics: &mut G2d,
-                                       cache: &mut G2dTexture,
-                                       rect: conrod::text::rt::Rect<u32>,
-                                       data: &[u8]|
-                {
-                    let offset = [rect.min.x, rect.min.y];
-                    let size = [rect.width(), rect.height()];
-                    let format = piston_window::texture::Format::Rgba8;
-                    let encoder = &mut graphics.encoder;
-                    let mut text_vertex_data = Vec::new();
-                    text_vertex_data.extend(data.iter().flat_map(|&b| vec![255, 255, 255, b]));
-                    UpdateTexture::update(cache, encoder, format, &text_vertex_data[..], offset, size)
-                        .expect("failed to update texture")
-                };
-
-            fn texture_from_image<T>(img: &T) -> &T { img }
-
-            conrod::backend::piston::draw::primitives(
-                primitives,
-                c,
-                gl,
-                ui_text_texture_cache,
-                ui_glyph_cache,
-                ui_image_map,
-                cache_queued_glyphs,
-                texture_from_image
-            );
-
-            image(cursor_icon, c.transform.trans(cursor_x, cursor_y), gl);
-        });
     }
 
     fn update(&mut self) {
@@ -377,14 +530,16 @@ impl Client {
                     Command::Connect { sender } => {
                         self.sender = Some(sender);
                     }
+
                     Command::Process { sender, planets, players, squads, gold, me } => {
                         self.planets = planets;
                         self.players = players;
                         self.squads = squads;
                         self.gold = gold;
                         self.me = me;
-                    },
-                    _ => { }
+                    }
+
+                    _ => ()
                 }
             };
         }
@@ -402,30 +557,34 @@ impl Client {
 
         if cursor_position_x >= (window_width - EDGE_WIDTH) {
             let mut speed = MAX_SPEED - (window_width - cursor_position_x) * speed_per_px;
-            speed /= self.camera.zoom;
-            self.camera.x += speed * self.camera.angle.cos();
-            self.camera.y -= speed * self.camera.angle.sin();
-        }
+            speed /= self.camera.zoom * 200.0;
 
-        if cursor_position_x <= EDGE_WIDTH {
-            let mut speed = MAX_SPEED - cursor_position_x * speed_per_px;
-            speed /= self.camera.zoom;
             self.camera.x -= speed * self.camera.angle.cos();
             self.camera.y += speed * self.camera.angle.sin();
         }
 
+        if cursor_position_x <= EDGE_WIDTH {
+            let mut speed = MAX_SPEED - cursor_position_x * speed_per_px;
+            speed /= self.camera.zoom * 200.0;
+
+            self.camera.x += speed * self.camera.angle.cos();
+            self.camera.y -= speed * self.camera.angle.sin();
+        }
+
         if cursor_position_y >= (window_height - EDGE_WIDTH) {
             let mut speed = MAX_SPEED - (window_height - cursor_position_y) * speed_per_px;
-            speed /= self.camera.zoom;
-            self.camera.y -= speed * self.camera.angle.cos();
-            self.camera.x -= speed * self.camera.angle.sin();
+            speed /= self.camera.zoom * 200.0;
+
+            self.camera.y += speed * self.camera.angle.cos();
+            self.camera.x += speed * self.camera.angle.sin();
         }
 
         if cursor_position_y <= EDGE_WIDTH {
             let mut speed = MAX_SPEED - cursor_position_y * speed_per_px;
-            speed /= self.camera.zoom;
-            self.camera.y += speed * self.camera.angle.cos();
-            self.camera.x += speed * self.camera.angle.sin();
+            speed /= self.camera.zoom * 200.0;
+
+            self.camera.y -= speed * self.camera.angle.cos();
+            self.camera.x -= speed * self.camera.angle.sin();
         }
     }
 
@@ -494,9 +653,9 @@ impl Client {
         }
     }
 
-    fn process_input(&mut self, event: &Input) {
+    fn process_input(&mut self, event: &glium::glutin::WindowEvent) {
         for mapping in self.get_input_mapping() {
-            if let Some(game_event) = mapping(&event) {
+            if let Some(game_event) = mapping(event) {
                 match game_event {
                     GameEvent::ReadyToPlay => {
                         let command_json = json::format_ready_command();
@@ -506,19 +665,8 @@ impl Client {
                         }
                     },
 
-                    GameEvent::Cursor(dx, dy) => {
-                        let (dx, dy) = self.normalize_mouse_cursor(dx, dy);
-                        let (cursor_x, cursor_y) = self.cursor_position;
-
-                        let x = cursor_x + dx;
-                        let y = cursor_y + dy;
-
-                        let Size { width, height } = self.window.size();
-
-                        self.cursor_position = (
-                            x.max(0_f64).min(width as f64),
-                            y.max(0_f64).min(height as f64)
-                        );
+                    GameEvent::Cursor(x, y) => {
+                        self.cursor_position = (x, y);
                     },
 
                     GameEvent::SelectStart => {
@@ -537,11 +685,11 @@ impl Client {
 
                     GameEvent::SquadMove => {
                         if let Some(squad_id) = self.current_selected_squad {
-                            let (x, y) = unproject(self.cursor_position, self.viewport, &self.camera);
+                            let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
 
                             if let Some(ref sender) = self.sender {
                                 let cut_count = self.get_cut_count();
-                                let command_json = json::format_squad_move_command(squad_id, x, y, cut_count);
+                                let command_json = json::format_squad_move_command(squad_id, x as f64, y as f64, cut_count);
                                 sender.send(command_json);
                             }
                         }
@@ -568,6 +716,8 @@ impl Client {
                         if self.camera.zoom > 2_f64 {
                             self.camera.zoom = 2_f64;
                         }
+
+                        self.zoom_camera();
                     }
 
                     GameEvent::ZoomOut => {
@@ -575,6 +725,8 @@ impl Client {
                         if self.camera.zoom < 0.1_f64 {
                             self.camera.zoom = 0.1_f64;
                         }
+
+                        self.zoom_camera();
                     }
 
                     GameEvent::Resize(width, height) => {
@@ -589,29 +741,13 @@ impl Client {
         }
     }
 
-    fn process_ui(&mut self, event: Input) {
-        let Size { width, height } = self.window.size();
-        let (cursor_x, cursor_y) = self.cursor_position;
-
-        match event {
-            Input::Move(Motion::MouseRelative(_, _)) => {
-                let mouse_cursor_motion = Motion::MouseCursor(
-                    cursor_x - width as f64 / 2_f64,
-                    -cursor_y + height as f64 / 2_f64
-                );
-                let conrod_event = conrod::event::Input::Move(mouse_cursor_motion);
-                self.ui.handle_event(conrod_event);
-            },
-
-            _ => {
-                if let Some(e) = conrod::backend::piston::event::convert(event, width as f64, height as f64) {
-                    self.ui.handle_event(e);
-                }
-            }
+    fn process_ui(&mut self, event: glium::glutin::WindowEvent) {
+        if let Some(input) = conrod::backend::winit::convert_window_event(event, &self.display) {
+            self.ui.handle_event(input);
         }
     }
 
-    fn get_input_mapping(&self) -> Vec<fn(&Input) -> Option<GameEvent>> {
+    fn get_input_mapping(&self) -> Vec<fn(&glium::glutin::WindowEvent) -> Option<GameEvent>> {
         vec![
             input_mapping::map_squad_input,
             input_mapping::map_planet_input,
@@ -620,10 +756,8 @@ impl Client {
     }
 
     fn select_planet(&mut self) {
-        let Size { width, height } = self.window.size();
-
-        let (x, y) = unproject(self.cursor_position, self.viewport, &self.camera);
-        let cursor_position = Position(x, y);
+        let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
+        let cursor_position = Position(x as f64, y as f64);
 
         self.current_selected_planet = self.planets
             .values()
@@ -632,10 +766,8 @@ impl Client {
     }
 
     fn select_squad(&mut self) {
-        let Size { width, height } = self.window.size();
-
-        let (x, y) = unproject(self.cursor_position, self.viewport, &self.camera);
-        let cursor_position = Position(x, y);
+        let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
+        let cursor_position = Position(x as f64, y as f64);
 
         self.current_selected_squad = self.squads
             .values()
@@ -659,15 +791,53 @@ impl Client {
         None
     }
 
-    fn normalize_mouse_cursor(&self, dx: f64, dy: f64) -> (f64, f64){
-        if cfg!(target_os = "macos") {
-            let Size { width, height } = self.window.size();
-            return (
-                dx - width as f64 / 2_f64,
-                dy - height as f64 / 2_f64
-            );
-        }
+    fn view_matrix(&self) -> [[f32; 4]; 4] {
+        let width = self.viewport[0];
+        let height = self.viewport[1];
 
-        (dx, dy)
+        let aspect_ratio = height as f32 / width as f32;
+
+        let Camera { left, right, bottom, top, near, far, .. } = self.camera;
+
+        let lr = aspect_ratio * 2.0 / (right - left);
+        let bt = 2.0 / (top - bottom);
+        let nf = -2.0 / (far - near);
+
+        let tx = - (right + left) / (right - left);
+        let ty = - (top + bottom) / (top - bottom);
+        let tz = - (far + near) / (far - near);
+
+        let x = self.camera.x as f32;
+        let y = self.camera.y as f32;
+
+        [
+            [ lr, 0.0, 0.0,  tx],
+            [0.0,  bt, 0.0,  ty],
+            [0.0, 0.0,  nf,  tz],
+            [  x,   y, 0.0, 1.0],
+        ]
+    }
+
+    fn cursor_matrix(&self) -> [[f32; 4]; 4] {
+        let cursor_ndc = get_ndc(self.cursor_position, self.viewport);
+
+        let width = self.viewport[0] as f32;
+        let height = self.viewport[1] as f32;
+
+        let aspect_ratio = height / width;
+
+        [
+            [aspect_ratio * 0.03, 0.0, 0.0, 0.0],
+            [0.0, 0.03, 0.0, 0.0],
+            [0.0, 0.0, 0.03, 0.0],
+            [cursor_ndc[0] as f32 + aspect_ratio * 0.03, cursor_ndc[1] as f32 - 0.03, 0.0, 1.0f32],
+        ]
+    }
+
+    fn zoom_camera(&mut self) {
+        self.camera.left = -500.0 * self.camera.zoom as f32;
+        self.camera.right = 500.0 * self.camera.zoom as f32;
+        self.camera.top = 500.0 * self.camera.zoom as f32;
+        self.camera.bottom = -500.0 * self.camera.zoom as f32;
     }
 }

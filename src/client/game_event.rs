@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum GameEvent {
     Cursor(f64, f64),
     SelectStart,

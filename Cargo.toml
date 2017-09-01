@@ -15,7 +15,10 @@ rustc-serialize = "0.3.16"
 gfx_device_gl = "0.13.0"
 vecmath = "0.3.0"
 fps_counter = "0.2.0"
+glium = "0.17.0"
+image = "0.15.0"
+glium_text_rusttype = "0.2.0"
 
 [dependencies.conrod]
-version = "0.51.0"
+version = "0.54.0"
 features = ["winit", "glium", "piston"]
