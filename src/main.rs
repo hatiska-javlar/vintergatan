@@ -14,6 +14,7 @@ extern crate fps_counter;
 extern crate glium;
 extern crate glium_text_rusttype;
 extern crate image;
+extern crate time;
 
 use getopts::Options;
 use std::env;

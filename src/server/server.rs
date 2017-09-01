@@ -1,34 +1,11 @@
 use std::cmp::min;
 use std::collections::HashMap;
-use std::sync::mpsc::{
-    channel,
-    Receiver as ChannelReceiver
-};
+use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 use std::thread;
 
-use piston::event_loop::{
-    Events,
-    EventLoop
-};
-use piston::input::{
-    RenderArgs,
-    RenderEvent,
-    UpdateArgs,
-    UpdateEvent
-};
-use piston::window::{
-    NoWindow,
-    WindowSettings
-};
-use rand::{
-    random,
-    thread_rng,
-    Rng
-};
-use ws::{
-    listen,
-    Sender
-};
+use time;
+use rand::{random, thread_rng, Rng};
+use ws::{listen, Sender};
 
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
@@ -65,23 +42,17 @@ impl Server {
         let (tx, rx) = channel::<Command>();
         thread::spawn(move || listen(&address[..], |sender| WebsocketHandler::new(sender, tx.clone())).unwrap());
 
-        let window_settings = WindowSettings::new("Vintergatan game server", [1, 1]);
-        let mut no_window = NoWindow::new(&window_settings);
+        let mut time = time::precise_time_s();
+        loop {
+            self.process(&rx);
 
-        let mut events = no_window
-            .events()
-            .ups(10)
-            .max_fps(10);
+            let dt = time::precise_time_s() - time;
+            time = time::precise_time_s();
 
-        while let Some(e) = events.next(&mut no_window) {
-            if let Some(u) = e.update_args() {
-                self.process(&rx);
-                self.update(&u);
-            }
+            self.update(dt);
+            self.render();
 
-            if let Some(r) = e.render_args() {
-                self.render(&r);
-            }
+            thread::sleep(::std::time::Duration::from_millis(100));
         }
     }
 
@@ -167,14 +138,12 @@ impl Server {
         }
     }
 
-    fn update(&mut self, args: &UpdateArgs) {
+    fn update(&mut self, dt: f64) {
         self.update_server_state();
 
         if !self.is_playing() {
             return;
         }
-
-        let dt = args.dt;
 
         self.update_players(dt);
         self.update_squads(dt);
@@ -402,7 +371,7 @@ impl Server {
         hits
     }
 
-    fn render(&mut self, args: &RenderArgs) {
+    fn render(&mut self) {
         let planets_json = json::format_planets(&self.planets);
         let players_json = json::format_players(&self.players);
         let squads_json = json::format_squads(&self.squads);
