@@ -5,17 +5,16 @@ authors = ["Fedor Gorbunov <raigfp@yandex-team.ru>", "Ilya Telegin <ilya.a.teleg
 
 [dependencies]
 getopts = "0.2"
-piston = "0.26.0"
-piston2d-graphics = "0.17.0"
-piston_window = "0.63.0"
-piston2d-opengl_graphics = "0.34.0"
 ws = "0.5.3"
 rand = "0.3.14"
 rustc-serialize = "0.3.16"
-gfx_device_gl = "0.13.0"
 vecmath = "0.3.0"
 fps_counter = "0.2.0"
+glium = "0.17.0"
+image = "0.15.0"
+glium_text_rusttype = "0.2.0"
+time = "0.1.36"
 
 [dependencies.conrod]
-version = "0.51.0"
+version = "0.54.0"
 features = ["winit", "glium", "piston"]

@@ -1,14 +1,16 @@
 extern crate getopts;
-extern crate piston;
-extern crate piston_window;
-extern crate opengl_graphics;
 extern crate ws;
 extern crate rand;
 extern crate rustc_serialize;
-#[macro_use] extern crate conrod;
-extern crate gfx_device_gl;
+#[macro_use]
+extern crate conrod;
 extern crate vecmath;
 extern crate fps_counter;
+#[macro_use]
+extern crate glium;
+extern crate glium_text_rusttype;
+extern crate image;
+extern crate time;
 
 use getopts::Options;
 use std::env;
