@@ -62,13 +62,13 @@ impl Server {
                 Command::Connect { sender } => self.add_player(sender),
 
                 Command::Ready { sender } => {
-                    let player_id = sender.token().as_usize() as PlayerId;
+                    let player_id = sender.token().0 as PlayerId;
                     self.players.get_mut(&player_id)
                         .map(|player| player.set_ready_state());
                 },
 
                 Command::SquadMove { sender, squad_id, x, y, cut_count } => {
-                    let player_id = sender.token().as_usize() as PlayerId;
+                    let player_id = sender.token().0 as PlayerId;
 
                     let position = Self::find_planet_by_position(&self.planets, Position(x, y))
                         .map_or(Position(x, y), |planet| planet.position());
@@ -109,7 +109,7 @@ impl Server {
                 },
 
                 Command::SquadSpawn { sender, planet_id } => {
-                    let player_id = sender.token().as_usize() as PlayerId;
+                    let player_id = sender.token().0 as PlayerId;
 
                     if let Some(planet) = self.planets.get(&planet_id) {
                         if let Some(player) = self.players.get_mut(&player_id) {

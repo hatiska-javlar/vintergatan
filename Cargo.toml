@@ -5,7 +5,7 @@ authors = ["Fedor Gorbunov <raigfp@yandex-team.ru>", "Ilya Telegin <ilya.a.teleg
 
 [dependencies]
 getopts = "0.2"
-ws = "0.5.3"
+ws = "0.7.3"
 rand = "0.3.14"
 rustc-serialize = "0.3.16"
 vecmath = "0.3.0"

@@ -28,7 +28,7 @@ impl Player {
     }
 
     pub fn id(&self) -> PlayerId {
-        self.sender.token().as_usize()
+        self.sender.token().0
     }
 
     pub fn send(&self, message: String) {
