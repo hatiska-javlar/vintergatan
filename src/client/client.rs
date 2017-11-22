@@ -20,9 +20,9 @@ use client::command::Command;
 use client::game_event::GameEvent;
 use client::input_mapping;
 use client::json;
-use client::planet::Planet;
 use client::player::Player;
 use client::squad::Squad;
+use client::waypoint::{Waypoint, WaypointType};
 use common::{Id, PlayerId, Position};
 use common::websocket_handler::WebsocketHandler;
 
@@ -83,6 +83,10 @@ fn unproject(window_coordinates: (f64, f64), pm: [[f32; 4]; 4], viewport: [f64; 
     (result[0], result[1])
 }
 
+fn color_from_rgb(r: u8, g: u8, b: u8, alpha: f32) -> [f32; 4] {
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, alpha]
+}
+
 struct Camera {
     x: f64,
     y: f64,
@@ -113,13 +117,13 @@ pub struct Client {
     cursor_shape: Vec<TextureVertex>,
     cursor_texture: glium::texture::SrgbTexture2d,
 
-    planets: HashMap<Id, Planet>,
+    waypoints: HashMap<Id, Waypoint>,
     players: HashMap<PlayerId, Player>,
     squads: HashMap<Id, Squad>,
     gold: f64,
     me: PlayerId,
 
-    current_selected_planet: Option<Id>,
+    current_selected_waypoint: Option<Id>,
     current_selected_squad: Option<Id>,
     is_modifier1: bool,
     is_modifier2: bool,
@@ -298,13 +302,13 @@ impl Client {
             cursor_shape,
             cursor_texture,
 
-            planets: HashMap::new(),
+            waypoints: HashMap::new(),
             players: HashMap::new(),
             squads: HashMap::new(),
             gold: 0.0,
             me: 0,
 
-            current_selected_planet: None,
+            current_selected_waypoint: None,
             current_selected_squad: None,
             is_modifier1: false,
             is_modifier2: false,
@@ -396,41 +400,24 @@ impl Client {
 
         let me = self.me;
 
-        let current_selected_planet = self.current_selected_planet;
+        let current_selected_waypoint = self.current_selected_waypoint;
         let current_selected_squad = self.current_selected_squad;
 
-        for planet in self.planets.values() {
-            let Position(planet_x, planet_y) = planet.position();
+        for waypoint in self.waypoints.values() {
+            let Position(waypoint_x, waypoint_y) = waypoint.position();
 
-            let planet_color = planet.owner().map_or(PLANET_COLOR, |owner| {
-                if owner == me {
-                    MY_PLANET_COLOR
-                } else {
-                    ENEMY_PLANET_COLOR
-                }
-            });
+            let waypoint_size = Self::get_waypoint_size(waypoint) as f32;
 
-            let uniforms = uniform! {
-                matrix: [
-                    [10.0, 0.0, 0.0, 0.0],
-                    [0.0, 10.0, 0.0, 0.0],
-                    [0.0, 0.0, 10.0, 0.0],
-                    [planet_x as f32, planet_y as f32, 0.0, 1.0f32],
-                ],
-                view: view,
-                color: planet_color
-            };
+            if let Some(current_selected_waypoint) = current_selected_waypoint {
+                if waypoint.id() == current_selected_waypoint {
+                    let selected_waypoint_size = (waypoint_size * 1.5).max(15.0);
 
-            frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
-
-            if let Some(current_selected_planet) = current_selected_planet {
-                if planet.id() == current_selected_planet {
                     let uniforms = uniform! {
                         matrix: [
-                            [15.0, 0.0, 0.0, 0.0],
-                            [0.0, 15.0, 0.0, 0.0],
-                            [0.0, 0.0, 15.0, 0.0],
-                            [planet_x as f32, planet_y as f32, 0.0, 1.0f32],
+                            [selected_waypoint_size, 0.0, 0.0, 0.0],
+                            [0.0, selected_waypoint_size, 0.0, 0.0],
+                            [0.0, 0.0, selected_waypoint_size, 0.0],
+                            [waypoint_x as f32, waypoint_y as f32, 0.0, 1.0f32],
                         ],
                         view: view,
                         color: SELECTION_COLOR
@@ -439,6 +426,19 @@ impl Client {
                     frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
                 }
             }
+
+            let uniforms = uniform! {
+                matrix: [
+                    [waypoint_size, 0.0, 0.0, 0.0],
+                    [0.0, waypoint_size, 0.0, 0.0],
+                    [0.0, 0.0, waypoint_size, 0.0],
+                    [waypoint_x as f32, waypoint_y as f32, 0.0, 1.0f32],
+                ],
+                view: view,
+                color: self.get_waypoint_color(waypoint)
+            };
+
+            frame.draw(&vertex_buffer, &indices, &self.program, &uniforms, &params).unwrap();
         }
 
         for squad in self.squads.values() {
@@ -531,8 +531,8 @@ impl Client {
                         self.sender = Some(sender);
                     }
 
-                    Command::Process { sender, planets, players, squads, gold, me } => {
-                        self.planets = planets;
+                    Command::Process { sender, waypoints, players, squads, gold, me } => {
+                        self.waypoints = waypoints;
                         self.players = players;
                         self.squads = squads;
                         self.gold = gold;
@@ -622,11 +622,13 @@ impl Client {
             .mid_left_of(self.ui_ids.header_items[0])
             .set(self.ui_ids.gold, &mut ui);
 
-        let planets = self.planets.values();
+        let waypoints = self.waypoints.values();
         let me = self.me;
         let planets_count = &format!(
             "Planets: {}",
-            planets.filter(|&planet| planet.owner().map_or(false, |owner| owner == me)).count()
+            waypoints
+                .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planet)
+                .filter(|&planet| planet.owner().map_or(false, |owner| owner == me)).count()
         );
 
         widget::Text::new(planets_count)
@@ -670,14 +672,14 @@ impl Client {
                     },
 
                     GameEvent::SelectStart => {
-                        self.select_planet();
+                        self.select_waypoint();
                         self.select_squad();
                     },
 
                     GameEvent::SquadSpawn => {
-                        if let Some(planet_id) = self.current_selected_planet {
+                        if let Some(waypoint_id) = self.current_selected_waypoint {
                             if let Some(ref sender) = self.sender {
-                                let command_json = json::format_squad_spawn_command(planet_id);
+                                let command_json = json::format_squad_spawn_command(waypoint_id);
                                 sender.send(command_json);
                             }
                         }
@@ -755,14 +757,14 @@ impl Client {
         ]
     }
 
-    fn select_planet(&mut self) {
+    fn select_waypoint(&mut self) {
         let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
         let cursor_position = Position(x as f64, y as f64);
 
-        self.current_selected_planet = self.planets
+        self.current_selected_waypoint = self.waypoints
             .values()
-            .find(|planet| cursor_position.distance_to(planet.position()) < 20_f64)
-            .map(|planet| planet.id());
+            .find(|waypoint| cursor_position.distance_to(waypoint.position()) < Self::get_waypoint_size(waypoint).max(20.0))
+            .map(|waypoint| waypoint.id());
     }
 
     fn select_squad(&mut self) {
@@ -789,6 +791,26 @@ impl Client {
         }
 
         None
+    }
+
+    fn get_waypoint_size(waypoint: &Waypoint) -> f64 {
+        match waypoint.waypoint_type() {
+            WaypointType::Planet => 50.0,
+            WaypointType::Planetoid => 20.0,
+            WaypointType::BlackHole => 15.0,
+            WaypointType::Asteroid => 5.0
+        }
+    }
+
+    fn get_waypoint_color(&self, waypoint: &Waypoint) -> [f32; 4] {
+        if waypoint.waypoint_type() == WaypointType::BlackHole {
+            return color_from_rgb(0, 0, 0, 1.0);
+        }
+
+        waypoint.owner().map_or(
+            color_from_rgb(255, 255, 255, 1.0),
+            |owner| if owner == self.me { color_from_rgb(164, 196, 0, 1.0) } else { color_from_rgb(229, 20, 0, 1.0) }
+        )
     }
 
     fn view_matrix(&self) -> [[f32; 4]; 4] {

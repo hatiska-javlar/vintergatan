@@ -1,9 +1,9 @@
 mod command;
 mod json;
-mod planet;
 mod player;
 mod server;
 mod squad;
+mod waypoint;
 
 use server::server::Server;
 

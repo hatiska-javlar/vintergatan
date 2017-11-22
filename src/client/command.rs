@@ -5,9 +5,9 @@ use ws::{Message, Sender};
 use common::{Id, ParseCommandError, ParseCommandResult, PlayerId};
 use common::to_command::ToCommand;
 use client::json;
-use client::planet::Planet;
 use client::player::Player;
 use client::squad::Squad;
+use client::waypoint::Waypoint;
 
 pub enum Command {
     Connect {
@@ -16,7 +16,7 @@ pub enum Command {
 
     Process {
         sender: Sender,
-        planets: HashMap<Id, Planet>,
+        waypoints: HashMap<Id, Waypoint>,
         players: HashMap<PlayerId, Player>,
         squads: HashMap<Id, Squad>,
         gold: f64,
@@ -37,11 +37,11 @@ impl ToCommand for Command {
         let raw = message.as_text()
             .map_err(ParseCommandError::BrokenCommand)?;
 
-        let (planets, players, squads, me, gold) = json::parse_process_command(raw)?;
+        let (waypoints, players, squads, me, gold) = json::parse_process_command(raw)?;
 
         let command = Command::Process {
             sender: sender,
-            planets: planets,
+            waypoints: waypoints,
             players: players,
             squads: squads,
             gold: gold,
