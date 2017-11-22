@@ -24,13 +24,11 @@ pub fn parse_squad_spawn_command_data(data: &Object) -> Result<Id> {
     json::parse_id_from_json_object(data, "planet_id")
 }
 
-pub fn parse_squad_move_command_data(data: &Object) -> Result<(Id, f64, f64, Option<u64>)> {
+pub fn parse_squad_move_command_data(data: &Object) -> Result<(Id, Id)> {
     let squad_id = json::parse_id_from_json_object(data, "squad_id")?;
-    let x = json::parse_f64_from_json_object(data, "x")?;
-    let y = json::parse_f64_from_json_object(data, "y")?;
-    let cut_count = json::parse_option_u64_from_json_object(data, "cut_count")?;
+    let waypoint_id = json::parse_id_from_json_object(data, "waypoint_id")?;
 
-    return Ok((squad_id, x, y, cut_count));
+    return Ok((squad_id, waypoint_id));
 }
 
 pub fn format_process_command(

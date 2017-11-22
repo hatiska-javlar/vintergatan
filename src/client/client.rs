@@ -687,12 +687,11 @@ impl Client {
 
                     GameEvent::SquadMove => {
                         if let Some(squad_id) = self.current_selected_squad {
-                            let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
-
-                            if let Some(ref sender) = self.sender {
-                                let cut_count = self.get_cut_count();
-                                let command_json = json::format_squad_move_command(squad_id, x as f64, y as f64, cut_count);
-                                sender.send(command_json);
+                            if let Some(waypoint) = self.find_waypoint_under_cursor() {
+                                if let Some(ref sender) = self.sender {
+                                    let command_json = json::format_squad_move_command(squad_id, waypoint.id());
+                                    sender.send(command_json);
+                                }
                             }
                         }
                     },
@@ -757,14 +756,17 @@ impl Client {
         ]
     }
 
-    fn select_waypoint(&mut self) {
+    fn find_waypoint_under_cursor(&self) -> Option<&Waypoint> {
         let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
         let cursor_position = Position(x as f64, y as f64);
 
-        self.current_selected_waypoint = self.waypoints
+        self.waypoints
             .values()
             .find(|waypoint| cursor_position.distance_to(waypoint.position()) < Self::get_waypoint_size(waypoint).max(20.0))
-            .map(|waypoint| waypoint.id());
+    }
+
+    fn select_waypoint(&mut self) {
+        self.current_selected_waypoint = self.find_waypoint_under_cursor().map(|waypoint| waypoint.id());
     }
 
     fn select_squad(&mut self) {
@@ -775,22 +777,6 @@ impl Client {
             .values()
             .find(|squad| cursor_position.distance_to(squad.position()) < 10_f64)
             .map(|squad| squad.id());
-    }
-
-    fn get_cut_count(&self) -> Option<u64> {
-        if self.is_modifier1 && self.is_modifier2 {
-            return Some(1);
-        }
-
-        if self.is_modifier1 {
-            return Some(10);
-        }
-
-        if self.is_modifier2 {
-            return Some(50);
-        }
-
-        None
     }
 
     fn get_waypoint_size(waypoint: &Waypoint) -> f64 {
