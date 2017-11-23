@@ -10,13 +10,13 @@ use fps_counter::FPSCounter;
 use conrod;
 use conrod::backend::glium::glium;
 use conrod::backend::glium::glium::Surface;
-use image;
 use glium_text_rusttype as glium_text;
 
 use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::command::Command;
+use client::game_cursor::GameCursor;
 use client::game_event::GameEvent;
 use client::input_mapping;
 use client::json;
@@ -32,14 +32,6 @@ struct Vertex {
 }
 
 implement_vertex!(Vertex, position);
-
-#[derive(Copy, Clone)]
-struct TextureVertex {
-    position: [f32; 2],
-    tex_coords: [f32; 2]
-}
-
-implement_vertex!(TextureVertex, position, tex_coords);
 
 widget_ids! {
     pub struct UiIds {
@@ -109,13 +101,10 @@ pub struct Client {
 
     shape: Vec<Vertex>,
     program: glium::Program,
-    texture_program: glium::Program,
 
     rx: Option<ChannelReceiver<Command>>,
 
-    cursor_position: (f64, f64),
-    cursor_shape: Vec<TextureVertex>,
-    cursor_texture: glium::texture::SrgbTexture2d,
+    game_cursor: GameCursor,
 
     waypoints: HashMap<Id, Waypoint>,
     players: HashMap<PlayerId, Player>,
@@ -162,6 +151,7 @@ impl Client {
 
         display.gl_window().set_cursor_state(glium::glutin::CursorState::Grab);
         display.gl_window().set_cursor(glium::glutin::MouseCursor::NoneCursor);
+        display.gl_window().set_cursor_position(WIDTH as i32 / 2, HEIGHT as i32 / 2);
 
         let text_system = glium_text::TextSystem::new(&display);
         let font = glium_text::FontTexture::new(
@@ -210,51 +200,6 @@ impl Client {
             },
         ).unwrap();
 
-        let cursor_shape = vec![
-            TextureVertex { position: [-1.0, -1.0], tex_coords: [0.0, 0.0] }, // 1
-            TextureVertex { position: [-1.0,  1.0], tex_coords: [0.0, 1.0] }, // 2
-            TextureVertex { position: [ 1.0,  1.0], tex_coords: [1.0, 1.0] }, // 3
-            TextureVertex { position: [ 1.0,  1.0], tex_coords: [1.0, 1.0] }, // 3
-            TextureVertex { position: [ 1.0, -1.0], tex_coords: [1.0, 0.0] }, // 4
-            TextureVertex { position: [-1.0, -1.0], tex_coords: [0.0, 0.0] }, // 1
-        ];
-
-        let texture_vertex_shader_src = r#"
-            #version 140
-
-            in vec2 position;
-            in vec2 tex_coords;
-            out vec2 v_tex_coords;
-
-            uniform mat4 matrix;
-
-            void main() {
-                v_tex_coords = tex_coords;
-                gl_Position = matrix * vec4(position, 0.0, 1.0);
-            }
-        "#;
-
-        let texture_fragment_shader_src = r#"
-            #version 140
-
-            in vec2 v_tex_coords;
-            out vec4 color;
-
-            uniform sampler2D tex;
-
-            void main() {
-                color = texture(tex, v_tex_coords);
-            }
-        "#;
-
-        let texture_program = glium::Program::from_source(&display, texture_vertex_shader_src, texture_fragment_shader_src, None).unwrap();
-
-        let cursor_image = image::load(::std::io::Cursor::new(&include_bytes!("../../assets/cursor.png")[..]), image::PNG).unwrap().to_rgba();
-        let cursor_image_dimensions = cursor_image.dimensions();
-        let cursor_image = glium::texture::RawImage2d::from_raw_rgba_reversed(&cursor_image.into_raw(), cursor_image_dimensions);
-
-        let cursor_texture = glium::texture::SrgbTexture2d::new(&display, cursor_image).unwrap();
-
         let theme = conrod::Theme {
             name: "Vintergatan theme".to_string(),
             padding: Padding::none(),
@@ -285,6 +230,8 @@ impl Client {
 
         let ui_renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
 
+        let game_cursor = GameCursor::new(&display);
+
         Client {
             events_loop,
             display,
@@ -294,13 +241,10 @@ impl Client {
 
             shape,
             program,
-            texture_program,
 
             rx: None,
 
-            cursor_position: (WIDTH as f64 / 2_f64, HEIGHT as f64 / 2_f64),
-            cursor_shape,
-            cursor_texture,
+            game_cursor,
 
             waypoints: HashMap::new(),
             players: HashMap::new(),
@@ -508,15 +452,7 @@ impl Client {
             self.ui_renderer.draw(&self.display, &mut frame, &self.ui_image_map).unwrap();
         }
 
-        let cursor_vertex_buffer = glium::VertexBuffer::new(&self.display, &self.cursor_shape).unwrap();
-        let cursor_indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
-
-        let cursor_uniform = uniform! {
-            matrix: self.cursor_matrix(),
-            tex: &self.cursor_texture
-        };
-
-        frame.draw(&cursor_vertex_buffer, &cursor_indices, &self.texture_program, &cursor_uniform, &params).unwrap();
+        self.game_cursor.draw(&mut frame);
 
         frame.finish().unwrap();
 
@@ -553,7 +489,7 @@ impl Client {
         let window_width = self.viewport[0];
         let window_height = self.viewport[1];
 
-        let (cursor_position_x, cursor_position_y) = self.cursor_position;
+        let (cursor_position_x, cursor_position_y) = self.game_cursor.position();
 
         if cursor_position_x >= (window_width - EDGE_WIDTH) {
             let mut speed = MAX_SPEED - (window_width - cursor_position_x) * speed_per_px;
@@ -668,7 +604,7 @@ impl Client {
                     },
 
                     GameEvent::Cursor(x, y) => {
-                        self.cursor_position = (x, y);
+                        self.game_cursor.set_position((x, y));
                     },
 
                     GameEvent::SelectStart => {
@@ -757,7 +693,7 @@ impl Client {
     }
 
     fn find_waypoint_under_cursor(&self) -> Option<&Waypoint> {
-        let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
+        let (x, y) = unproject(self.game_cursor.position(), self.view_matrix(), self.viewport, &self.camera);
         let cursor_position = Position(x as f64, y as f64);
 
         self.waypoints
@@ -770,7 +706,7 @@ impl Client {
     }
 
     fn select_squad(&mut self) {
-        let (x, y) = unproject(self.cursor_position, self.view_matrix(), self.viewport, &self.camera);
+        let (x, y) = unproject(self.game_cursor.position(), self.view_matrix(), self.viewport, &self.camera);
         let cursor_position = Position(x as f64, y as f64);
 
         self.current_selected_squad = self.squads
@@ -823,22 +759,6 @@ impl Client {
             [0.0,  bt, 0.0,  ty],
             [0.0, 0.0,  nf,  tz],
             [  x,   y, 0.0, 1.0],
-        ]
-    }
-
-    fn cursor_matrix(&self) -> [[f32; 4]; 4] {
-        let cursor_ndc = get_ndc(self.cursor_position, self.viewport);
-
-        let width = self.viewport[0] as f32;
-        let height = self.viewport[1] as f32;
-
-        let aspect_ratio = height / width;
-
-        [
-            [aspect_ratio * 0.03, 0.0, 0.0, 0.0],
-            [0.0, 0.03, 0.0, 0.0],
-            [0.0, 0.0, 0.03, 0.0],
-            [cursor_ndc[0] as f32 + aspect_ratio * 0.03, cursor_ndc[1] as f32 - 0.03, 0.0, 1.0f32],
         ]
     }
 
