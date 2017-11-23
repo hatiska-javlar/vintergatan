@@ -12,8 +12,8 @@ use common::websocket_handler::WebsocketHandler;
 use server::command::Command;
 use server::json;
 use server::player::Player;
-use server::planet::Planet;
 use server::squad::{Squad, SquadState};
+use server::waypoint::{Waypoint, WaypointType};
 
 enum ServerState {
     Waiting,
@@ -23,18 +23,18 @@ enum ServerState {
 
 pub struct Server {
     state: ServerState,
-    planets: HashMap<Id, Planet>,
     players: HashMap<PlayerId, Player>,
-    squads: HashMap<Id, Squad>
+    squads: HashMap<Id, Squad>,
+    waypoints: HashMap<Id, Waypoint>
 }
 
 impl Server {
     pub fn new() -> Self {
         Server {
             state: ServerState::Waiting,
-            planets: Self::generate_planets(),
             players: HashMap::new(),
-            squads: HashMap::new()
+            squads: HashMap::new(),
+            waypoints: Self::generate_waypoints()
         }
     }
 
@@ -70,8 +70,8 @@ impl Server {
                 Command::SquadMove { sender, squad_id, x, y, cut_count } => {
                     let player_id = sender.token().0 as PlayerId;
 
-                    let position = Self::find_planet_by_position(&self.planets, Position(x, y))
-                        .map_or(Position(x, y), |planet| planet.position());
+                    let position = Self::find_waypoint_by_position(&self.waypoints, Position(x, y))
+                        .map_or(Position(x, y), |waypoint| waypoint.position());
 
                     match cut_count {
                         Some(count) => {
@@ -111,23 +111,27 @@ impl Server {
                 Command::SquadSpawn { sender, planet_id } => {
                     let player_id = sender.token().0 as PlayerId;
 
-                    if let Some(planet) = self.planets.get(&planet_id) {
-                        if let Some(player) = self.players.get_mut(&player_id) {
-                            let is_owner = planet.owner().map_or(false, |owner| owner == player_id);
+                    if let Some(waypoint) = self.waypoints.get(&planet_id) {
+                        if waypoint.waypoint_type() == WaypointType::Planet {
+                            let planet = waypoint;
 
-                            let gold = player.gold();
-                            let has_gold = gold > 10_f64;
+                            if let Some(player) = self.players.get_mut(&player_id) {
+                                let is_owner = planet.owner().map_or(false, |owner| owner == player_id);
 
-                            if is_owner && has_gold {
-                                let squad_id = random::<Id>();
-                                let position = planet.position();
+                                let gold = player.gold();
+                                let has_gold = gold > 10_f64;
 
-                                let mut squad = Squad::new(squad_id, player_id, position);
-                                squad.set_state(SquadState::OnOrbit { planet_id: planet.id() });
+                                if is_owner && has_gold {
+                                    let squad_id = random::<Id>();
+                                    let position = planet.position();
 
-                                self.squads.insert(squad_id, squad);
+                                    let mut squad = Squad::new(squad_id, player_id, position);
+                                    squad.set_state(SquadState::OnOrbit { waypoint_id: planet.id() });
 
-                                player.set_gold(gold - 10.0);
+                                    self.squads.insert(squad_id, squad);
+
+                                    player.set_gold(gold - 10.0);
+                                }
                             }
                         }
                     }
@@ -147,7 +151,7 @@ impl Server {
 
         self.update_players(dt);
         self.update_squads(dt);
-        self.update_planets();
+        self.update_waypoints();
 
         self.merge_squads();
         self.update_fight(dt);
@@ -196,8 +200,9 @@ impl Server {
 
     fn update_players(&mut self, dt: f64) {
         for player in self.players.values_mut() {
-            let planets_count = self.planets
+            let planets_count = self.waypoints
                 .values()
+                .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planet)
                 .filter(|planet| planet.owner().map_or(false, |owner| player.id() == owner))
                 .count();
 
@@ -205,11 +210,22 @@ impl Server {
                 player.set_loose_state();
             }
 
-            if planets_count == self.planets.len() {
+            let total_planets_count = self.waypoints
+                .values()
+                .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planet)
+                .count();
+
+            if planets_count == total_planets_count {
                 player.set_win_state();
             }
 
-            let gold = player.gold() + 1_f64 * (planets_count as f64).powf(1_f64 / 3_f64) * dt;
+            let planetoids_count = self.waypoints
+                .values()
+                .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planetoid)
+                .filter(|planetoid| planetoid.owner().map_or(false, |owner| player.id() == owner))
+                .count();
+
+            let gold = player.gold() + 1_f64 * (planetoids_count as f64).powf(1_f64 / 3_f64) * dt;
             player.set_gold(gold);
         }
     }
@@ -231,8 +247,8 @@ impl Server {
                     if distance < max_step_distance {
                         squad.set_position(destination);
 
-                        let state = Self::find_planet_by_position(&self.planets, destination)
-                            .map_or(SquadState::InSpace, |planet| SquadState::OnOrbit { planet_id: planet.id() });
+                        let state = Self::find_waypoint_by_position(&self.waypoints, destination)
+                            .map_or(SquadState::InSpace, |waypoint| SquadState::OnOrbit { waypoint_id: waypoint.id() });
 
                         squad.set_state(state);
                     } else {
@@ -251,17 +267,18 @@ impl Server {
         }
     }
 
-    fn update_planets(&mut self) {
-        for planet in self.planets.values_mut() {
+    fn update_waypoints(&mut self) {
+        for waypoint in self.waypoints.values_mut() {
             let squads_on_orbit = self.squads
                 .values()
-                .filter(|squad| squad.is_on_orbit(planet.id()))
+                .filter(|squad| squad.is_on_orbit(waypoint.id()))
                 .collect::<Vec<_>>();
 
             if let Some(first_squad) = squads_on_orbit.first() {
                 let owner = first_squad.owner();
-                if squads_on_orbit.iter().all(|squad| squad.owner() == owner) {
-                    planet.set_owner(Some(owner));
+                if squads_on_orbit.iter().all(|squad| squad.owner() == owner) &&
+                    (waypoint.waypoint_type() == WaypointType::Planet || waypoint.waypoint_type() == WaypointType::Planetoid) {
+                    waypoint.set_owner(Some(owner));
                 }
             }
         }
@@ -372,14 +389,14 @@ impl Server {
     }
 
     fn render(&mut self) {
-        let planets_json = json::format_planets(&self.planets);
+        let waypoints_json = json::format_waypoints(&self.waypoints);
         let players_json = json::format_players(&self.players);
         let squads_json = json::format_squads(&self.squads);
 
         for player in self.players.values() {
             let process_command_json = json::format_process_command(
                 player,
-                &planets_json,
+                &waypoints_json,
                 &players_json,
                 &squads_json
             );
@@ -388,11 +405,11 @@ impl Server {
         }
     }
 
-    fn generate_planets() -> HashMap<Id, Planet> {
-        let half_window_width = 640;
-        let half_window_height = 400;
+    fn generate_waypoints() -> HashMap<Id, Waypoint> {
+        let half_window_width = 1000;
+        let half_window_height = 1000;
         let planets_density = 1.0;
-        let grid_step = 40;
+        let grid_step = 100;
 
         let grid_x_start = -half_window_width + grid_step;
         let grid_x_end = half_window_width - grid_step;
@@ -416,16 +433,24 @@ impl Server {
         thread_rng().shuffle(&mut grid_x_coordinates);
         thread_rng().shuffle(&mut grid_y_coordinates);
 
-        let mut planets = HashMap::new();
+        let mut waypoints = HashMap::new();
         for i in 0..(max_planets_count as f64 * planets_density) as usize {
             let id = random::<u64>();
             let position = Position(grid_x_coordinates[i], grid_y_coordinates[i]);
 
-            let planet = Planet::new(id, position);
-            planets.insert(id, planet);
+            let waypoint_type = match random::<u64>() % 10 {
+                0...4 => WaypointType::Asteroid,
+                5...7 => WaypointType::Planetoid,
+                8 => WaypointType::Planet,
+                9 => WaypointType::BlackHole,
+                _ => unreachable!()
+            };
+
+            let waypoint = Waypoint::new(id, waypoint_type, position);
+            waypoints.insert(id, waypoint);
         }
 
-        planets
+        waypoints
     }
 
     fn add_player(&mut self, sender: Sender) {
@@ -441,20 +466,24 @@ impl Server {
         let player_id = player.id();
         players.insert(player_id, player);
 
-        let planet = self.planets.values_mut().find(|planet| planet.owner().is_none());
+        let planet = self.waypoints
+            .values_mut()
+            .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planet)
+            .find(|planet| planet.owner().is_none());
+
         if let Some(planet) = planet {
             planet.set_owner(Some(player_id));
         }
     }
 
-    fn find_planet_by_position(planets: &HashMap<Id, Planet>, position: Position) -> Option<&Planet> {
+    fn find_waypoint_by_position(waypoints: &HashMap<Id, Waypoint>, position: Position) -> Option<&Waypoint> {
         let Position(x, y) = position;
 
-        planets
+        waypoints
             .values()
-            .find(|planet| {
-                let Position(planet_x, planet_y) = planet.position();
-                ((planet_x - x).powi(2) + (planet_y - y).powi(2)).sqrt() < 10_f64
+            .find(|waypoint| {
+                let Position(waypoint_x, waypoint_y) = waypoint.position();
+                ((waypoint_x - x).powi(2) + (waypoint_y - y).powi(2)).sqrt() < 10_f64
             })
     }
 }

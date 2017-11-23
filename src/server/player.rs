@@ -23,7 +23,7 @@ impl Player {
             sender: sender,
             state: PlayerState::Pending,
             name: name,
-            gold: 0.0
+            gold: 15.0
         }
     }
 

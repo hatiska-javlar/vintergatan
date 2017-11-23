@@ -15,7 +15,7 @@ pub enum SquadState {
         destination: Position
     },
     OnOrbit {
-        planet_id: Id
+        waypoint_id: Id
     }
 }
 
@@ -66,9 +66,9 @@ impl Squad {
         self.state = SquadState::Moving { destination: position };
     }
 
-    pub fn is_on_orbit(&self, orbit_planet_id: Id) -> bool {
+    pub fn is_on_orbit(&self, orbit_waypoint_id: Id) -> bool {
         match self.state {
-            SquadState::OnOrbit { planet_id } => planet_id == orbit_planet_id,
+            SquadState::OnOrbit { waypoint_id } => waypoint_id == orbit_waypoint_id,
             _ => false
         }
     }

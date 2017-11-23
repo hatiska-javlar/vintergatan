@@ -4,9 +4,9 @@ use rustc_serialize::json::{Json, Object};
 
 use common::{Id, PlayerId, ParseCommandResult, Position, utils};
 use common::utils::json;
-use server::planet::Planet;
 use server::player::{Player, PlayerState};
 use server::squad::Squad;
+use server::waypoint::{Waypoint, WaypointType};
 
 type Result<T> = ParseCommandResult<T>;
 
@@ -35,13 +35,13 @@ pub fn parse_squad_move_command_data(data: &Object) -> Result<(Id, f64, f64, Opt
 
 pub fn format_process_command(
     player: &Player,
-    planets_json: &String,
+    waypoints_json: &String,
     players_json: &String,
     squads_json: &String
 ) -> String {
     format!(
-        r#"{{"planets":{},"players":{},"squads":{},"id":{},"gold":{}}}"#,
-        planets_json,
+        r#"{{"waypoints":{},"players":{},"squads":{},"id":{},"gold":{}}}"#,
+        waypoints_json,
         players_json,
         squads_json,
         player.id(),
@@ -49,24 +49,30 @@ pub fn format_process_command(
     )
 }
 
-pub fn format_planets(planets: &HashMap<Id, Planet>) -> String {
-    let formatted_planets = planets
+pub fn format_waypoints(waypoints: &HashMap<Id, Waypoint>) -> String {
+    let formatted_waypoints = waypoints
         .values()
-        .map(|planet| {
-            let Position(x, y) = planet.position();
-            let owner = planet.owner().map_or("null".to_string(), |owner| owner.to_string());
+        .map(|waypoint| {
+            let Position(x, y) = waypoint.position();
+            let owner = waypoint.owner().map_or("null".to_string(), |owner| owner.to_string());
 
             format!(
-                r#"{{"id":{},"x":{},"y":{},"owner":{}}}"#,
-                planet.id(),
+                r#"{{"id":{},"x":{},"y":{},"owner":{},"type":"{}"}}"#,
+                waypoint.id(),
                 x,
                 y,
-                owner
+                owner,
+                match waypoint.waypoint_type() {
+                    WaypointType::Planetoid => "planetoid",
+                    WaypointType::Asteroid => "asteroid",
+                    WaypointType::Planet => "planet",
+                    WaypointType::BlackHole => "black_hole"
+                }
             )
         })
         .collect::<Vec<String>>();
 
-    format!("[{}]", utils::join(formatted_planets, ","))
+    format!("[{}]", utils::join(formatted_waypoints, ","))
 }
 
 pub fn format_players(players: &HashMap<PlayerId, Player>) -> String {
