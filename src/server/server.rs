@@ -67,44 +67,15 @@ impl Server {
                         .map(|player| player.set_ready_state());
                 },
 
-                Command::SquadMove { sender, squad_id, x, y, cut_count } => {
+                Command::SquadMove { sender, squad_id, waypoint_id } => {
                     let player_id = sender.token().0 as PlayerId;
 
-                    let position = Self::find_waypoint_by_position(&self.waypoints, Position(x, y))
-                        .map_or(Position(x, y), |waypoint| waypoint.position());
-
-                    match cut_count {
-                        Some(count) => {
-                            let squad_data = self.squads
-                                .get(&squad_id)
-                                .map(|squad| (squad.owner(), squad.life(), squad.position()));
-
-                            if let Some((squad_owner_id, squad_life, squad_position)) = squad_data {
-                                let is_owner = squad_owner_id == player_id;
-                                let is_can_cut = squad_life > count as f64;
-
-                                if is_owner && is_can_cut {
-                                    self.squads.get_mut(&squad_id).map(|squad| {
-                                        let life = squad.life();
-                                        squad.set_life(life - count as f64);
-                                    });
-
-                                    let mut squad = Squad::new(random::<Id>(), player_id, squad_position);
-                                    squad.set_life(count as f64);
-                                    squad.move_to(position);
-
-                                    self.squads.insert(squad.id(), squad);
-                                }
+                    if let Some(waypoint) = self.waypoints.get(&waypoint_id) {
+                        self.squads.get_mut(&squad_id).map(|squad| {
+                            if squad.owner() == player_id {
+                                squad.move_to(waypoint.position());
                             }
-                        },
-
-                        None => {
-                            self.squads.get_mut(&squad_id).map(|squad| {
-                                if squad.owner() == player_id {
-                                    squad.move_to(position);
-                                }
-                            });
-                        }
+                        });
                     }
                 },
 
