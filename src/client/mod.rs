@@ -1,5 +1,6 @@
 mod client;
 mod command;
+mod game_cursor;
 mod game_event;
 mod input_mapping;
 mod json;
