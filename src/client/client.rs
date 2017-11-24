@@ -15,6 +15,7 @@ use glium_text_rusttype as glium_text;
 use ws::{connect, Sender};
 use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
+use client::camera::Camera;
 use client::command::Command;
 use client::game_cursor::GameCursor;
 use client::game_event::GameEvent;
@@ -49,47 +50,8 @@ widget_ids! {
     }
 }
 
-fn get_ndc(window_coordinates: (f64, f64), viewport: [f64; 2]) -> [f32; 4] {
-    let (x, y) = window_coordinates;
-
-    let width = viewport[0];
-    let height = viewport[1];
-
-    [
-         (x as f32) * 2.0 / (width as f32) - 1.0,
-        -(y as f32) * 2.0 / (height as f32) + 1.0,
-        -1.0,
-         1.0
-    ]
-}
-
-fn unproject(window_coordinates: (f64, f64), pm: [[f32; 4]; 4], viewport: [f64; 2], camera: &Camera) -> (f32, f32) {
-    let inv = vecmath::mat4_inv(pm);
-
-    let mut ndc = get_ndc(window_coordinates, viewport);
-    ndc[0] -= camera.x as f32;
-    ndc[1] -= camera.y as f32;
-
-    let result = vecmath::row_mat4_transform(inv, ndc);
-
-    (result[0], result[1])
-}
-
 fn color_from_rgb(r: u8, g: u8, b: u8, alpha: f32) -> [f32; 4] {
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, alpha]
-}
-
-struct Camera {
-    x: f64,
-    y: f64,
-    zoom: f64,
-    angle: f64,
-    left: f32,
-    right: f32,
-    top: f32,
-    bottom: f32,
-    near: f32,
-    far: f32
 }
 
 pub struct Client {
@@ -264,18 +226,7 @@ impl Client {
             ui_renderer,
 
             viewport: [WIDTH as f64, HEIGHT as f64],
-            camera: Camera {
-                x: 0_f64,
-                y: 0_f64,
-                zoom: 1_f64,
-                angle: 0_f64,
-                left: -500.0,
-                right: 500.0,
-                top: 500.0,
-                bottom: -500.0,
-                near: 10.0,
-                far: 100.0
-            },
+            camera: Camera::new(),
 
             fps: 0,
             fps_counter: FPSCounter::new()
@@ -311,7 +262,8 @@ impl Client {
 
             self.update();
             self.update_ui();
-            self.update_viewport();
+
+            self.camera.update(self.game_cursor.position(), &self.viewport, 0.05);
 
             thread::sleep(Duration::from_millis(40));
         }
@@ -335,7 +287,7 @@ impl Client {
         let vertex_buffer = glium::VertexBuffer::new(&self.display, &self.shape).unwrap();
         let indices = glium::index::NoIndices(glium::index::PrimitiveType::TriangleFan);
 
-        let view = self.view_matrix();
+        let view = self.camera.view_matrix(&self.viewport);
 
         let params = glium::DrawParameters {
             blend: glium::draw_parameters::Blend::alpha_blending(),
@@ -481,49 +433,6 @@ impl Client {
         }
     }
 
-    fn update_viewport(&mut self) {
-        const EDGE_WIDTH: f64 = 30.0;
-        const MAX_SPEED: f64 = 15.0;
-        let speed_per_px = MAX_SPEED / EDGE_WIDTH;
-
-        let window_width = self.viewport[0];
-        let window_height = self.viewport[1];
-
-        let (cursor_position_x, cursor_position_y) = self.game_cursor.position();
-
-        if cursor_position_x >= (window_width - EDGE_WIDTH) {
-            let mut speed = MAX_SPEED - (window_width - cursor_position_x) * speed_per_px;
-            speed /= self.camera.zoom * 200.0;
-
-            self.camera.x -= speed * self.camera.angle.cos();
-            self.camera.y += speed * self.camera.angle.sin();
-        }
-
-        if cursor_position_x <= EDGE_WIDTH {
-            let mut speed = MAX_SPEED - cursor_position_x * speed_per_px;
-            speed /= self.camera.zoom * 200.0;
-
-            self.camera.x += speed * self.camera.angle.cos();
-            self.camera.y -= speed * self.camera.angle.sin();
-        }
-
-        if cursor_position_y >= (window_height - EDGE_WIDTH) {
-            let mut speed = MAX_SPEED - (window_height - cursor_position_y) * speed_per_px;
-            speed /= self.camera.zoom * 200.0;
-
-            self.camera.y += speed * self.camera.angle.cos();
-            self.camera.x += speed * self.camera.angle.sin();
-        }
-
-        if cursor_position_y <= EDGE_WIDTH {
-            let mut speed = MAX_SPEED - cursor_position_y * speed_per_px;
-            speed /= self.camera.zoom * 200.0;
-
-            self.camera.y -= speed * self.camera.angle.cos();
-            self.camera.x -= speed * self.camera.angle.sin();
-        }
-    }
-
     fn update_ui(&mut self) {
         use conrod::{Widget, widget, Colorable, color, Positionable};
 
@@ -649,21 +558,11 @@ impl Client {
                     },
 
                     GameEvent::ZoomIn => {
-                        self.camera.zoom += 0.1_f64;
-                        if self.camera.zoom > 2_f64 {
-                            self.camera.zoom = 2_f64;
-                        }
-
-                        self.zoom_camera();
+                        self.camera.zoom_in();
                     }
 
                     GameEvent::ZoomOut => {
-                        self.camera.zoom -= 0.1_f64;
-                        if self.camera.zoom < 0.1_f64 {
-                            self.camera.zoom = 0.1_f64;
-                        }
-
-                        self.zoom_camera();
+                        self.camera.zoom_out();
                     }
 
                     GameEvent::Resize(width, height) => {
@@ -693,7 +592,7 @@ impl Client {
     }
 
     fn find_waypoint_under_cursor(&self) -> Option<&Waypoint> {
-        let (x, y) = unproject(self.game_cursor.position(), self.view_matrix(), self.viewport, &self.camera);
+        let (x, y) = self.cursor_world_coordinates();
         let cursor_position = Position(x as f64, y as f64);
 
         self.waypoints
@@ -706,7 +605,7 @@ impl Client {
     }
 
     fn select_squad(&mut self) {
-        let (x, y) = unproject(self.game_cursor.position(), self.view_matrix(), self.viewport, &self.camera);
+        let (x, y) = self.cursor_world_coordinates();
         let cursor_position = Position(x as f64, y as f64);
 
         self.current_selected_squad = self.squads
@@ -735,37 +634,7 @@ impl Client {
         )
     }
 
-    fn view_matrix(&self) -> [[f32; 4]; 4] {
-        let width = self.viewport[0];
-        let height = self.viewport[1];
-
-        let aspect_ratio = height as f32 / width as f32;
-
-        let Camera { left, right, bottom, top, near, far, .. } = self.camera;
-
-        let lr = aspect_ratio * 2.0 / (right - left);
-        let bt = 2.0 / (top - bottom);
-        let nf = -2.0 / (far - near);
-
-        let tx = - (right + left) / (right - left);
-        let ty = - (top + bottom) / (top - bottom);
-        let tz = - (far + near) / (far - near);
-
-        let x = self.camera.x as f32;
-        let y = self.camera.y as f32;
-
-        [
-            [ lr, 0.0, 0.0,  tx],
-            [0.0,  bt, 0.0,  ty],
-            [0.0, 0.0,  nf,  tz],
-            [  x,   y, 0.0, 1.0],
-        ]
-    }
-
-    fn zoom_camera(&mut self) {
-        self.camera.left = -500.0 * self.camera.zoom as f32;
-        self.camera.right = 500.0 * self.camera.zoom as f32;
-        self.camera.top = 500.0 * self.camera.zoom as f32;
-        self.camera.bottom = -500.0 * self.camera.zoom as f32;
+    fn cursor_world_coordinates(&self) -> (f32, f32) {
+        self.camera.unproject(self.game_cursor.position(), &self.viewport)
     }
 }

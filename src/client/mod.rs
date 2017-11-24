@@ -1,4 +1,5 @@
 mod client;
+mod camera;
 mod command;
 mod game_cursor;
 mod game_event;
