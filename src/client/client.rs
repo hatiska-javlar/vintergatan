@@ -1,24 +1,20 @@
 use std::thread;
 use std::collections::HashMap;
-use std::env::current_dir;
 use std::time::Duration;
-use std::cmp::min;
-use vecmath;
+use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use fps_counter::FPSCounter;
-
-use conrod;
-use conrod::backend::glium::glium;
-use conrod::backend::glium::glium::Surface;
+use glium;
+use glium::Surface;
 use glium_text_rusttype as glium_text;
-
+use vecmath;
 use ws::{connect, Sender};
-use std::sync::mpsc::{channel, Receiver as ChannelReceiver};
 
 use client::camera::Camera;
 use client::command::Command;
 use client::game_cursor::GameCursor;
 use client::game_event::GameEvent;
+use client::game_ui::GameUi;
 use client::input_mapping;
 use client::json;
 use client::player::Player;
@@ -33,22 +29,6 @@ struct Vertex {
 }
 
 implement_vertex!(Vertex, position);
-
-widget_ids! {
-    pub struct UiIds {
-        master,
-
-        header,
-        header_items[],
-
-        body,
-
-        gold,
-        planets,
-        fps,
-        players[]
-    }
-}
 
 fn color_from_rgb(r: u8, g: u8, b: u8, alpha: f32) -> [f32; 4] {
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, alpha]
@@ -80,10 +60,7 @@ pub struct Client {
     is_modifier2: bool,
     sender: Option<Sender>,
 
-    ui: conrod::Ui,
-    ui_ids: UiIds,
-    ui_image_map: conrod::image::Map<glium::texture::Texture2d>,
-    ui_renderer: conrod::backend::glium::Renderer,
+    game_ui: GameUi,
 
     viewport: [f64; 2],
     camera: Camera,
@@ -94,8 +71,6 @@ pub struct Client {
 
 impl Client {
     pub fn new() -> Self {
-        use conrod::position::{Padding, Position, Relative, Align, Direction};
-
         const WIDTH: u32 = 1280;
         const HEIGHT: u32 = 800;
 
@@ -162,35 +137,7 @@ impl Client {
             },
         ).unwrap();
 
-        let theme = conrod::Theme {
-            name: "Vintergatan theme".to_string(),
-            padding: Padding::none(),
-            x_position: Position::Relative(Relative::Align(Align::Start), None),
-            y_position: Position::Relative(Relative::Direction(Direction::Backwards, 20.0), None),
-            background_color: conrod::color::TRANSPARENT,
-            shape_color: conrod::color::LIGHT_CHARCOAL,
-            border_color: conrod::color::BLACK,
-            border_width: 0.0,
-            label_color: conrod::color::WHITE,
-            font_id: None,
-            font_size_large: 18,
-            font_size_medium: 14,
-            font_size_small: 12,
-            widget_styling: conrod::theme::StyleMap::default(),
-            mouse_drag_threshold: 0.0,
-            double_click_threshold: Duration::from_millis(500),
-        };
-
-        let mut ui = conrod::UiBuilder::new([WIDTH as f64, HEIGHT as f64])
-            .theme(theme)
-            .build();
-
-        let font_path = current_dir().unwrap().join("assets/Exo2-Regular.ttf");
-        ui.fonts.insert_from_file(&font_path).unwrap();
-
-        let ui_ids = UiIds::new(ui.widget_id_generator());
-
-        let ui_renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
+        let game_ui = GameUi::new(&display, WIDTH as f64, HEIGHT as f64);
 
         let game_cursor = GameCursor::new(&display);
 
@@ -220,10 +167,7 @@ impl Client {
             is_modifier2: false,
             sender: None,
 
-            ui: ui,
-            ui_ids: ui_ids,
-            ui_image_map: conrod::image::Map::new(),
-            ui_renderer,
+            game_ui,
 
             viewport: [WIDTH as f64, HEIGHT as f64],
             camera: Camera::new(),
@@ -250,7 +194,7 @@ impl Client {
                             glium::glutin::WindowEvent::Closed => break 'main,
                             _ => {
                                 self.process_input(&event);
-                                self.process_ui(event);
+                                self.game_ui.process_event(&self.display, event);
                             }
                         }
                     }
@@ -261,7 +205,7 @@ impl Client {
             self.render();
 
             self.update();
-            self.update_ui();
+            self.update_game_ui();
 
             self.camera.update(self.game_cursor.position(), &self.viewport, 0.05);
 
@@ -398,11 +342,7 @@ impl Client {
             glium_text::draw(&text, &self.text_system, &mut frame, vecmath::col_mat4_mul(view, matrix), (text_color[0], text_color[1], text_color[2], text_color[3]));
         }
 
-        {
-            let primitives = self.ui.draw();
-            self.ui_renderer.fill(&self.display, primitives, &self.ui_image_map);
-            self.ui_renderer.draw(&self.display, &mut frame, &self.ui_image_map).unwrap();
-        }
+        self.game_ui.draw(&self.display, &mut frame);
 
         self.game_cursor.draw(&mut frame);
 
@@ -433,71 +373,23 @@ impl Client {
         }
     }
 
-    fn update_ui(&mut self) {
-        use conrod::{Widget, widget, Colorable, color, Positionable};
+    fn update_game_ui(&mut self) {
+        let players_count = self.players.len();
 
-        const HEADER_ITEMS_COUNT: usize = 8;
-        const HEADER_PADDING: f64 = 10.0;
+        let planets_count = self.waypoints
+            .values()
+            .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planet)
+            .filter(|&planet| planet.owner().map_or(false, |owner| owner == self.me))
+            .count();
 
-        let mut ui = self.ui.set_widgets();
-
-        self.ui_ids.header_items.resize(HEADER_ITEMS_COUNT, &mut ui.widget_id_generator());
-        self.ui_ids.players.resize(self.players.len(), &mut ui.widget_id_generator());
-
-        let mut header_items = vec![];
-        for i in 0..HEADER_ITEMS_COUNT {
-            header_items.push(
-                (
-                    self.ui_ids.header_items[i],
-                    widget::Canvas::new().pad_left(HEADER_PADDING).pad_right(HEADER_PADDING)
-                )
-            )
-        }
-
-        widget::Canvas::new().flow_down(&[
-            (
-                self.ui_ids.header,
-                widget::Canvas::new().length(30.0).color(color::DARK_CHARCOAL).flow_right(&header_items)
-            ),
-            (self.ui_ids.body, widget::Canvas::new())
-        ]).set(self.ui_ids.master, &mut ui);
-
-        widget::Text::new(&format!("Gold: {}", self.gold.floor()))
-            .color(color::LIGHT_BLUE)
-            .mid_left_of(self.ui_ids.header_items[0])
-            .set(self.ui_ids.gold, &mut ui);
-
-        let waypoints = self.waypoints.values();
-        let me = self.me;
-        let planets_count = &format!(
-            "Planets: {}",
-            waypoints
-                .filter(|waypoint| waypoint.waypoint_type() == WaypointType::Planet)
-                .filter(|&planet| planet.owner().map_or(false, |owner| owner == me)).count()
-        );
-
-        widget::Text::new(planets_count)
-            .color(color::LIGHT_BLUE)
-            .mid_left_of(self.ui_ids.header_items[1])
-            .set(self.ui_ids.planets, &mut ui);
-
-        widget::Text::new(&format!("FPS: {}", self.fps))
-            .color(color::LIGHT_BLUE)
-            .mid_left_of(self.ui_ids.header_items[2])
-            .set(self.ui_ids.fps, &mut ui);
-
-        let mut players_state = self.players.values()
+        let mut players_states = self.players
+            .values()
             .map(|player| format!("{}: {}", player.name(), player.state()))
             .collect::<Vec<_>>();
 
-        players_state.sort();
-        let players_state_slice = &players_state[0..min(4, players_state.len())];
-        for i in 0..players_state_slice.len() {
-            widget::Text::new(&players_state_slice[i])
-                .color(color::LIGHT_BLUE)
-                .mid_left_of(self.ui_ids.header_items[HEADER_ITEMS_COUNT - players_state_slice.len() + i])
-                .set(self.ui_ids.players[i], &mut ui);
-        }
+        players_states.sort();
+
+        self.game_ui.update(players_count, self.gold, planets_count, self.fps, players_states);
     }
 
     fn process_input(&mut self, event: &glium::glutin::WindowEvent) {
@@ -574,12 +466,6 @@ impl Client {
 
                 break;
             }
-        }
-    }
-
-    fn process_ui(&mut self, event: glium::glutin::WindowEvent) {
-        if let Some(input) = conrod::backend::winit::convert_window_event(event, &self.display) {
-            self.ui.handle_event(input);
         }
     }
 
