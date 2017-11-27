@@ -3,6 +3,7 @@ mod camera;
 mod command;
 mod game_cursor;
 mod game_event;
+mod game_ui;
 mod input_mapping;
 mod json;
 mod player;
